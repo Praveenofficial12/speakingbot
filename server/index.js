@@ -7,8 +7,11 @@ import rateLimit from 'express-rate-limit';
 import mongoose from 'mongoose';
 import jwt from 'jsonwebtoken';
 import bcrypt from 'bcryptjs';
+import path from 'path';
+import { fileURLToPath } from 'url';
 
 const app=express();
+const __dirname=path.dirname(fileURLToPath(import.meta.url));
 const PORT=Number(process.env.PORT||5000);
 const MONGO_URI=process.env.MONGO_URI;
 const JWT_SECRET=process.env.JWT_SECRET;
@@ -30,4 +33,9 @@ app.post('/api/attempts',auth,async(req,res)=>{try{const{testId,score,maxScore,d
 app.get('/api/my/attempts',auth,async(req,res)=>res.json({attempts:await Attempt.find({userId:req.user._id}).sort({completedAt:-1}).limit(100).lean()}));
 app.get('/api/admin/metrics',auth,adminOnly,async(_req,res)=>{const since=new Date(Date.now()-300000);const[totalUsers,activeUsers,totalAttempts,recentAttempts,students]=await Promise.all([User.countDocuments(),User.countDocuments({lastSeenAt:{$gte:since}}),Attempt.countDocuments(),Attempt.find({completedAt:{$gte:new Date(Date.now()-86400000)}}).sort({completedAt:-1}).limit(20).populate('userId','name email').lean(),User.find({},'name email role lastSeenAt createdAt').sort({lastSeenAt:-1}).limit(500).lean()]);res.json({totalUsers,activeUsers,totalAttempts,recentAttempts,students,generatedAt:new Date().toISOString()})});
 app.get('/api/admin/users',auth,adminOnly,async(_req,res)=>res.json({users:await User.find({},'name email role lastSeenAt createdAt').sort({lastSeenAt:-1}).limit(500).lean()}));
+
+// In production, the same service can serve the Vite build, keeping deployment simple.
+const dist=path.resolve(__dirname,'../dist');
+app.use(express.static(dist));
+app.get('*',(req,res)=>{ if(req.path.startsWith('/api/')) return res.status(404).json({error:'API route not found'}); res.sendFile(path.join(dist,'index.html')); });
 async function start(){await mongoose.connect(MONGO_URI,{maxPoolSize:Number(process.env.DB_POOL_SIZE||30),minPoolSize:5,serverSelectionTimeoutMS:5000});app.listen(PORT,()=>console.log('SpeakingBot API listening on '+PORT))}start().catch(e=>{console.error('Database connection failed:',e.message);process.exit(1)});

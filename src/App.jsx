@@ -195,7 +195,9 @@ function TestCard({test,onStart}) {
 
 function Tests({navigate,startTest,search}) {
   const [filter,setFilter]=useState('All');
-  const filtered=useMemo(()=>TESTS.filter(t => (filter==='All'||t.category===filter) && (!search||JSON.stringify(t).toLowerCase().includes(search.toLowerCase()))),[filter,search]);
+  const [tests,setTests]=useState(TESTS);
+  useEffect(()=>{ api('/tests').then(data=>{ if(data.tests?.length) setTests(data.tests.map(t=>({...t,id:t.testId,questions:t.questions||0,attempts:t.attempts||0}))); }).catch(()=>{}); },[]);
+  const filtered=useMemo(()=>tests.filter(t => (filter==='All'||t.category===filter) && (!search||JSON.stringify(t).toLowerCase().includes(search.toLowerCase()))),[tests,filter,search]);
   return <main className="container page-pad"><div className="page-hero"><div><div className="kicker">Practice library</div><h1>Choose your next challenge.</h1><p>Timed practice sets designed for placement preparation and technical interviews.</p></div><button className="btn primary" onClick={()=>startTest(filtered[0]||TESTS[0])}><Play size={17}/> Quick start</button></div>
     <div className="filter-row"><div className="filter-pills">{['All','Aptitude','Technical','Reasoning','Verbal'].map(x=><button className={filter===x?'selected':''} key={x} onClick={()=>setFilter(x)}>{x}</button>)}</div><span>{filtered.length} tests</span></div>
     <div className="test-grid large">{filtered.map(t=><TestCard key={t.id} test={t} onStart={startTest}/>)}</div>

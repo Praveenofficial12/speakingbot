@@ -4,90 +4,576 @@ import cors from 'cors';
 import helmet from 'helmet';
 import compression from 'compression';
 import rateLimit from 'express-rate-limit';
-import mongoose from 'mongoose';
 import jwt from 'jsonwebtoken';
 import bcrypt from 'bcryptjs';
+import pg from 'pg';
 import path from 'path';
 import { fileURLToPath } from 'url';
 
-const app=express();
-const __dirname=path.dirname(fileURLToPath(import.meta.url));
-const PORT=Number(process.env.PORT||5000);
-const MONGO_URI=process.env.MONGO_URI;
-const JWT_SECRET=process.env.JWT_SECRET||'speakingbot-preview-secret-change-before-production';
-const CLIENT_ORIGIN=process.env.CLIENT_ORIGIN||'*';
-const ADMIN_USERNAME=(process.env.ADMIN_USERNAME||'').trim();
-const ADMIN_EMAIL=(process.env.ADMIN_EMAIL||'').toLowerCase();
-const ADMIN_PASSWORD=process.env.ADMIN_PASSWORD||'';
-const DB_CONFIGURED=Boolean(MONGO_URI);
-app.set('trust proxy',1);app.use(helmet({crossOriginResourcePolicy:false}));app.use(compression());app.use(cors({origin:CLIENT_ORIGIN==='*'?true:CLIENT_ORIGIN.split(',').map(x=>x.trim()),credentials:true}));app.use(express.json({limit:'100kb'}));app.use(rateLimit({windowMs:60000,max:180,standardHeaders:true,legacyHeaders:false}));
-const userSchema=new mongoose.Schema({name:{type:String,required:true,trim:true,maxlength:80},email:{type:String,required:true,unique:true,lowercase:true,trim:true,index:true},passwordHash:{type:String,required:true},role:{type:String,enum:['student','admin'],default:'student',index:true},lastSeenAt:{type:Date,default:Date.now,index:true},createdAt:{type:Date,default:Date.now}});
-const testSchema=new mongoose.Schema({
-  testId:{type:String,required:true,unique:true,index:true}, title:{type:String,required:true}, category:String, topic:String,
-  difficulty:{type:String,enum:['Easy','Medium','Hard'],default:'Medium'}, duration:Number, premium:{type:Boolean,default:false},
-  published:{type:Boolean,default:true}, createdAt:{type:Date,default:Date.now}, updatedAt:{type:Date,default:Date.now}
-});
-const questionSchema=new mongoose.Schema({
-  testId:{type:String,required:true,index:true}, text:{type:String,required:true}, options:{type:[String],required:true},
-  answer:{type:Number,required:true,min:0}, explanation:String, topic:String, difficulty:String, published:{type:Boolean,default:true},
-  createdAt:{type:Date,default:Date.now}, updatedAt:{type:Date,default:Date.now}
-});
-const attemptSchema=new mongoose.Schema({userId:{type:mongoose.Schema.Types.ObjectId,ref:'User',index:true},testId:{type:String,required:true,index:true},score:Number,maxScore:Number,percentage:Number,durationSeconds:Number,completedAt:{type:Date,default:Date.now,index:true}});
-const User=mongoose.model('User',userSchema);const Test=mongoose.model('Test',testSchema);const Question=mongoose.model('Question',questionSchema);const Attempt=mongoose.model('Attempt',attemptSchema);
-const accessSchema=new mongoose.Schema({email:{type:String,required:true,lowercase:true,trim:true,index:true},testId:{type:String,required:true,index:true},startAt:{type:Date,required:true,index:true},endAt:{type:Date,required:true,index:true},accessPasswordHash:{type:String,required:true},label:{type:String,default:'Company Assessment'},active:{type:Boolean,default:true,index:true},createdBy:{type:mongoose.Schema.Types.ObjectId,ref:'User'},createdAt:{type:Date,default:Date.now}});
-const AssessmentAccess=mongoose.model('AssessmentAccess',accessSchema);
+const { Pool } = pg;
+const app = express();
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const PORT = Number(process.env.PORT || 5000);
+const DATABASE_URL = process.env.DATABASE_URL || '';
+const JWT_SECRET = process.env.JWT_SECRET || 'speakingbot-preview-secret-change-before-production';
+const CLIENT_ORIGIN = process.env.CLIENT_ORIGIN || '*';
+const ADMIN_USERNAME = (process.env.ADMIN_USERNAME || '').trim();
+const ADMIN_EMAIL = (process.env.ADMIN_EMAIL || '').toLowerCase().trim();
+const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || '';
+const DB_CONFIGURED = Boolean(DATABASE_URL);
 
-const auth=async(req,res,next)=>{try{const token=(req.headers.authorization||'').replace(/^Bearer\\s+/i,'');if(!token)return res.status(401).json({error:'Authentication required'});const payload=jwt.verify(token,JWT_SECRET);const user=await User.findById(payload.sub).lean();if(!user)return res.status(401).json({error:'User not found'});req.user=user;await User.updateOne({_id:user._id},{$set:{lastSeenAt:new Date()}});next()}catch{res.status(401).json({error:'Invalid or expired session'})}};
-const adminOnly=(req,res,next)=>req.user.role==='admin'?next():res.status(403).json({error:'Admin access required'});
-app.get('/api/health',async(_req,res)=>{const db=mongoose.connection.readyState===1;res.status(200).json({ok:true,database:db?'connected':'not-configured',service:'speakingbot-api',uptime:Math.round(process.uptime()),timestamp:new Date().toISOString()})});
-app.post('/api/auth/register',async(req,res)=>{try{const{name,email,password}=req.body||{};if(!name||!email||!password||password.length<8)return res.status(400).json({error:'Name, valid email and password of at least 8 characters are required'});const normalized=String(email).toLowerCase().trim();if(await User.exists({email:normalized}))return res.status(409).json({error:'Email already registered'});const passwordHash=await bcrypt.hash(password,12);const role='student';const user=await User.create({name,email:normalized,passwordHash,role,lastSeenAt:new Date()});const token=jwt.sign({sub:user._id.toString(),role},JWT_SECRET,{expiresIn:'7d'});res.status(201).json({token,user:{id:user._id,name:user.name,email:user.email,role}})}catch{res.status(500).json({error:'Registration failed'})}});
-app.post('/api/auth/login',async(req,res)=>{try{const{identifier,email,password}=req.body||{};const rawIdentifier=String(identifier??email??'').trim();const normalized=rawIdentifier.toLowerCase();let user=await User.findOne({email:normalized});
-  if(!user&&ADMIN_USERNAME&&rawIdentifier===ADMIN_USERNAME&&ADMIN_PASSWORD&&password===ADMIN_PASSWORD){
-    const adminEmail=ADMIN_EMAIL||'admin@vsbec.local';
-    user=await User.findOne({email:adminEmail});
-    if(!user){const passwordHash=await bcrypt.hash(ADMIN_PASSWORD,12);user=await User.create({name:'VSBEC Admin',email:adminEmail,passwordHash,role:'admin',lastSeenAt:new Date()});}
-    else if(user.role!=='admin'){user.role='admin';user.passwordHash=await bcrypt.hash(ADMIN_PASSWORD,12);await user.save();}
+const pool = DB_CONFIGURED
+  ? new Pool({
+      connectionString: DATABASE_URL,
+      max: Number(process.env.DB_POOL_SIZE || 20),
+      min: 0,
+      idleTimeoutMillis: 30000,
+      connectionTimeoutMillis: 5000,
+      ssl: DATABASE_URL.includes('render.com') ? { rejectUnauthorized: false } : undefined
+    })
+  : null;
+
+app.set('trust proxy', 1);
+app.use(helmet({ crossOriginResourcePolicy: false }));
+app.use(compression());
+app.use(cors({
+  origin: CLIENT_ORIGIN === '*' ? true : CLIENT_ORIGIN.split(',').map(x => x.trim()),
+  credentials: true
+}));
+app.use(express.json({ limit: '100kb' }));
+app.use(rateLimit({
+  windowMs: 60000,
+  max: 180,
+  standardHeaders: true,
+  legacyHeaders: false
+}));
+
+const query = (text, params = []) => {
+  if (!pool) throw new Error('Database is not configured');
+  return pool.query(text, params);
+};
+
+async function ensureSchema() {
+  await query(`
+    CREATE TABLE IF NOT EXISTS users (
+      id SERIAL PRIMARY KEY,
+      name VARCHAR(80) NOT NULL,
+      email VARCHAR(255) NOT NULL UNIQUE,
+      password_hash TEXT NOT NULL,
+      role VARCHAR(20) NOT NULL DEFAULT 'student' CHECK (role IN ('student','admin')),
+      last_seen_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+    CREATE INDEX IF NOT EXISTS idx_users_last_seen ON users(last_seen_at);
+    CREATE INDEX IF NOT EXISTS idx_users_role ON users(role);
+
+    CREATE TABLE IF NOT EXISTS tests (
+      id SERIAL PRIMARY KEY,
+      test_id VARCHAR(120) NOT NULL UNIQUE,
+      title VARCHAR(200) NOT NULL,
+      category VARCHAR(80),
+      topic VARCHAR(120),
+      difficulty VARCHAR(20) NOT NULL DEFAULT 'Medium',
+      duration INTEGER NOT NULL DEFAULT 15,
+      premium BOOLEAN NOT NULL DEFAULT FALSE,
+      published BOOLEAN NOT NULL DEFAULT TRUE,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+    CREATE INDEX IF NOT EXISTS idx_tests_category ON tests(category);
+    CREATE INDEX IF NOT EXISTS idx_tests_published ON tests(published);
+
+    CREATE TABLE IF NOT EXISTS questions (
+      id SERIAL PRIMARY KEY,
+      test_id VARCHAR(120) NOT NULL REFERENCES tests(test_id) ON DELETE CASCADE,
+      text TEXT NOT NULL,
+      options JSONB NOT NULL,
+      answer INTEGER NOT NULL CHECK (answer >= 0),
+      explanation TEXT,
+      topic VARCHAR(120),
+      difficulty VARCHAR(20),
+      published BOOLEAN NOT NULL DEFAULT TRUE,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+    CREATE INDEX IF NOT EXISTS idx_questions_test ON questions(test_id);
+
+    CREATE TABLE IF NOT EXISTS attempts (
+      id SERIAL PRIMARY KEY,
+      user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      test_id VARCHAR(120) NOT NULL REFERENCES tests(test_id) ON DELETE CASCADE,
+      score INTEGER NOT NULL,
+      max_score INTEGER NOT NULL,
+      percentage INTEGER NOT NULL,
+      duration_seconds INTEGER NOT NULL DEFAULT 0,
+      completed_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+    CREATE INDEX IF NOT EXISTS idx_attempts_user ON attempts(user_id);
+    CREATE INDEX IF NOT EXISTS idx_attempts_test ON attempts(test_id);
+    CREATE INDEX IF NOT EXISTS idx_attempts_completed ON attempts(completed_at);
+
+    CREATE TABLE IF NOT EXISTS assessment_access (
+      id SERIAL PRIMARY KEY,
+      email VARCHAR(255) NOT NULL,
+      test_id VARCHAR(120) NOT NULL REFERENCES tests(test_id) ON DELETE CASCADE,
+      start_at TIMESTAMPTZ NOT NULL,
+      end_at TIMESTAMPTZ NOT NULL,
+      access_password_hash TEXT NOT NULL,
+      label VARCHAR(200) NOT NULL DEFAULT 'Company Assessment',
+      active BOOLEAN NOT NULL DEFAULT TRUE,
+      created_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+    CREATE INDEX IF NOT EXISTS idx_access_email ON assessment_access(email);
+    CREATE INDEX IF NOT EXISTS idx_access_window ON assessment_access(start_at, end_at);
+    CREATE INDEX IF NOT EXISTS idx_access_active ON assessment_access(active);
+  `);
+}
+
+async function seedDemo() {
+  if (!DB_CONFIGURED || process.env.SEED_DEMO === 'false') return;
+  const tests = [
+    ['apt-1','Quantitative Aptitude — Placement Set 01','Aptitude','Quantitative Aptitude','Medium',20],
+    ['sql-1','SQL & DBMS Interview Challenge','Technical','SQL','Medium',15],
+    ['java-1','Java OOP Mastery Test','Technical','Java','Hard',25],
+    ['logic-1','Logical Reasoning — Fast Track','Reasoning','Logical Reasoning','Easy',12],
+    ['python-1','Python Coding Fundamentals','Technical','Python','Medium',20],
+    ['verbal-1','Verbal Ability & Grammar Sprint','Verbal','Verbal Ability','Easy',15]
+  ];
+  for (const t of tests) {
+    await query(`
+      INSERT INTO tests(test_id,title,category,topic,difficulty,duration)
+      VALUES($1,$2,$3,$4,$5,$6)
+      ON CONFLICT(test_id) DO NOTHING
+    `, t);
   }
-  if(!user||!(await bcrypt.compare(password||'',user.passwordHash)))return res.status(401).json({error:'Invalid email/username or password'});
-  user.lastSeenAt=new Date();await user.save();const token=jwt.sign({sub:user._id.toString(),role:user.role},JWT_SECRET,{expiresIn:'7d'});res.json({token,user:{id:user._id,name:user.name,email:user.email,role:user.role}});
-}catch{res.status(500).json({error:'Login failed'})}});
-app.get('/api/tests',async(req,res)=>{ if(!DB_CONFIGURED)return res.json({tests:[],databaseConfigured:false});
-  const category=req.query.category; const q=String(req.query.q||'').trim();
-  const filter={published:true}; if(category) filter.category=category;
-  if(q) filter.$or=[{title:{$regex:q,$options:'i'}},{topic:{$regex:q,$options:'i'}},{category:{$regex:q,$options:'i'}}];
-  const tests=await Test.find(filter).sort({createdAt:-1}).lean(); const ids=tests.map(t=>t.testId); const counts=ids.length?await Question.aggregate([{$match:{testId:{$in:ids},published:true}},{$group:{_id:'$testId',count:{$sum:1}}} ]):[]; const attempts=ids.length?await Attempt.aggregate([{$match:{testId:{$in:ids}}},{$group:{_id:'$testId',count:{$sum:1}}}]):[]; const qm=Object.fromEntries(counts.map(x=>[x._id,x.count])); const am=Object.fromEntries(attempts.map(x=>[x._id,x.count])); res.json({tests:tests.map(t=>({...t,questions:qm[t.testId]||0,attempts:am[t.testId]||0}))});
-});
-app.get('/api/tests/:testId',async(req,res)=>{ if(!DB_CONFIGURED)return res.status(503).json({error:'Database not configured yet'});
-  const test=await Test.findOne({testId:req.params.testId,published:true}).lean();
-  if(!test)return res.status(404).json({error:'Test not found'});
-  const questions=await Question.find({testId:test.testId,published:true}).sort({createdAt:1}).lean();
-  res.json({test,questions});
-});
-app.get('/api/me',auth,(req,res)=>res.json({user:{id:req.user._id,name:req.user.name,email:req.user.email,role:req.user.role}}));
-app.post('/api/heartbeat',auth,async(req,res)=>{await User.updateOne({_id:req.user._id},{$set:{lastSeenAt:new Date()}});res.json({ok:true})});
-app.post('/api/attempts/submit',auth,async(req,res)=>{try{const{testId,answers,durationSeconds}=req.body||{};if(!testId||!answers||typeof answers!=='object')return res.status(400).json({error:'Invalid submission'});const questions=await Question.find({testId,published:true}).lean();if(!questions.length)return res.status(404).json({error:'Test questions not found'});let correct=0;for(const q of questions){if(Number(answers[q._id])===q.answer||Number(answers[q.id])===q.answer)correct++}const answered=Object.keys(answers).length;const maxScore=questions.length;const attempt=await Attempt.create({userId:req.user._id,testId,score:correct,maxScore,percentage:Math.round(correct/maxScore*100),durationSeconds:Math.max(0,Number(durationSeconds||0))});res.status(201).json({attempt,correct,answered,skipped:maxScore-answered,questions:questions.length})}catch(e){res.status(500).json({error:'Could not submit attempt'})}});
-app.get('/api/my/attempts',auth,async(req,res)=>res.json({attempts:await Attempt.find({userId:req.user._id}).sort({completedAt:-1}).limit(100).lean()}));
-app.get('/api/my/scheduled-tests',auth,async(req,res)=>{const now=new Date();const access=await AssessmentAccess.find({email:req.user.email,active:true,endAt:{$gte:now}}).sort({startAt:1}).lean();const ids=[...new Set(access.map(a=>a.testId))];const tests=ids.length?await Test.find({testId:{$in:ids}}).lean():[];const map=Object.fromEntries(tests.map(t=>[t.testId,t]));res.json({tests:access.map(a=>({...a,test:map[a.testId]||null,accessPasswordRequired:true}))})});
-app.post('/api/scheduled-tests/:id/verify',auth,async(req,res)=>{try{const access=await AssessmentAccess.findOne({_id:req.params.id,email:req.user.email,active:true}).lean();if(!access)return res.status(404).json({error:'Assessment access not found'});const now=new Date();if(now<access.startAt)return res.status(403).json({error:'Assessment has not started yet',startAt:access.startAt});if(now>access.endAt)return res.status(403).json({error:'Assessment access has expired',endAt:access.endAt});if(!(await bcrypt.compare(String(req.body?.password||''),access.accessPasswordHash)))return res.status(401).json({error:'Incorrect assessment access password'});const test=await Test.findOne({testId:access.testId,published:true}).lean();if(!test)return res.status(404).json({error:'Scheduled test is unavailable'});const questions=await Question.find({testId:test.testId,published:true}).sort({createdAt:1}).lean();res.json({accessId:access._id,test,questions,window:{startAt:access.startAt,endAt:access.endAt}})}catch{res.status(500).json({error:'Could not verify assessment access'})}});
-app.get('/api/admin/schedules',auth,adminOnly,async(_req,res)=>res.json({schedules:await AssessmentAccess.find().sort({startAt:1}).populate('createdBy','name email').lean()}));
-app.post('/api/admin/schedules',auth,adminOnly,async(req,res)=>{try{const{email,testId,startAt,endAt,password,label}=req.body||{};if(!email||!testId||!startAt||!endAt||!password||String(password).length<6)return res.status(400).json({error:'Email, test, start/end time and a 6+ character access password are required'});const start=new Date(startAt),end=new Date(endAt);if(isNaN(start)||isNaN(end)||end<=start)return res.status(400).json({error:'Invalid assessment time window'});if(!(await Test.exists({testId})))return res.status(404).json({error:'Test not found'});const access=await AssessmentAccess.create({email:String(email).toLowerCase().trim(),testId,startAt:start,endAt:end,accessPasswordHash:await bcrypt.hash(String(password),12),label:label||'Company Assessment',createdBy:req.user._id});res.status(201).json({schedule:{id:access._id,email:access.email,testId:access.testId,startAt:access.startAt,endAt:access.endAt,label:access.label},accessPassword:String(password)})}catch{res.status(400).json({error:'Could not create scheduled assessment'})}});
-app.delete('/api/admin/schedules/:id',auth,adminOnly,async(req,res)=>{const x=await AssessmentAccess.findByIdAndDelete(req.params.id);if(!x)return res.status(404).json({error:'Schedule not found'});res.json({ok:true})});
+  const questions = [
+    ['sql-1','Which SQL clause filters grouped records?',['WHERE','HAVING','ORDER BY','LIMIT'],1,'HAVING filters groups after GROUP BY.','SQL','Medium'],
+    ['java-1','Which OOP principle allows the same method name to behave differently?',['Encapsulation','Inheritance','Polymorphism','Abstraction'],2,'Polymorphism supports different implementations through a common interface.','OOP','Medium'],
+    ['python-1','Which Python collection stores key-value pairs?',['List','Tuple','Set','Dictionary'],3,'A dictionary stores key-value pairs.','Python','Easy']
+  ];
+  for (const q of questions) {
+    const exists = await query('SELECT id FROM questions WHERE test_id=$1 AND text=$2 LIMIT 1', [q[0], q[1]]);
+    if (!exists.rowCount) {
+      await query(`
+        INSERT INTO questions(test_id,text,options,answer,explanation,topic,difficulty)
+        VALUES($1,$2,$3::jsonb,$4,$5,$6,$7)
+      `, [q[0], q[1], JSON.stringify(q[2]), q[3], q[4], q[5], q[6]]);
+    }
+  }
+}
 
-app.get('/api/admin/metrics',auth,adminOnly,async(_req,res)=>{const since=new Date(Date.now()-300000);const[totalUsers,activeUsers,totalAttempts,recentAttempts,students,scheduledTests]=await Promise.all([User.countDocuments(),User.countDocuments({lastSeenAt:{$gte:since}}),Attempt.countDocuments(),Attempt.find({completedAt:{$gte:new Date(Date.now()-86400000)}}).sort({completedAt:-1}).limit(20).populate('userId','name email').lean(),User.find({},'name email role lastSeenAt createdAt').sort({lastSeenAt:-1}).limit(5000).lean(),AssessmentAccess.countDocuments({active:true,endAt:{$gte:new Date()}})]);res.json({totalUsers,activeUsers,totalAttempts,recentAttempts,students,scheduledTests,generatedAt:new Date().toISOString()})});
-app.get('/api/admin/tests',auth,adminOnly,async(_req,res)=>res.json({tests:await Test.find().sort({createdAt:-1}).lean()}));
-app.post('/api/admin/tests',auth,adminOnly,async(req,res)=>{try{const test=await Test.create(req.body);res.status(201).json({test})}catch(e){res.status(400).json({error:e.code===11000?'Test ID already exists':e.message})}});
-app.patch('/api/admin/tests/:testId',auth,adminOnly,async(req,res)=>{const test=await Test.findOneAndUpdate({testId:req.params.testId},{$set:{...req.body,updatedAt:new Date()}},{new:true});if(!test)return res.status(404).json({error:'Test not found'});res.json({test})});
-app.delete('/api/admin/tests/:testId',auth,adminOnly,async(req,res)=>{const test=await Test.findOneAndDelete({testId:req.params.testId});if(!test)return res.status(404).json({error:'Test not found'});await Question.deleteMany({testId:req.params.testId});res.json({ok:true})});
-app.get('/api/admin/tests/:testId/questions',auth,adminOnly,async(req,res)=>res.json({questions:await Question.find({testId:req.params.testId}).sort({createdAt:1}).lean()}));
-app.post('/api/admin/tests/:testId/questions',auth,adminOnly,async(req,res)=>{try{const question=await Question.create({...req.body,testId:req.params.testId});res.status(201).json({question})}catch(e){res.status(400).json({error:e.message})}});
-app.patch('/api/admin/questions/:id',auth,adminOnly,async(req,res)=>{const question=await Question.findByIdAndUpdate(req.params.id,{$set:{...req.body,updatedAt:new Date()}},{new:true});if(!question)return res.status(404).json({error:'Question not found'});res.json({question})});
-app.delete('/api/admin/questions/:id',auth,adminOnly,async(req,res)=>{const question=await Question.findByIdAndDelete(req.params.id);if(!question)return res.status(404).json({error:'Question not found'});res.json({ok:true})});
-app.get('/api/admin/users',auth,adminOnly,async(_req,res)=>res.json({users:await User.find({},'name email role lastSeenAt createdAt').sort({lastSeenAt:-1}).limit(5000).lean()}));
+const publicUser = u => ({ id: u.id, name: u.name, email: u.email, role: u.role });
+const publicQuestion = q => ({
+  ...q,
+  _id: q.id,
+  options: Array.isArray(q.options) ? q.options : JSON.parse(q.options || '[]')
+});
 
-// In production, the same service can serve the Vite build, keeping deployment simple.
+async function loadUser(id) {
+  const r = await query(
+    'SELECT id,name,email,role,last_seen_at AS "lastSeenAt",created_at AS "createdAt" FROM users WHERE id=$1 LIMIT 1',
+    [id]
+  );
+  return r.rows[0] || null;
+}
+
+const auth = async (req, res, next) => {
+  if (!DB_CONFIGURED) return res.status(503).json({ error: 'Database is not configured yet' });
+  try {
+    const token = (req.headers.authorization || '').replace(/^Bearer\s+/i, '');
+    if (!token) return res.status(401).json({ error: 'Authentication required' });
+    const payload = jwt.verify(token, JWT_SECRET);
+    const user = await loadUser(payload.sub);
+    if (!user) return res.status(401).json({ error: 'User not found' });
+    req.user = user;
+    await query('UPDATE users SET last_seen_at=NOW() WHERE id=$1', [user.id]);
+    next();
+  } catch {
+    res.status(401).json({ error: 'Invalid or expired session' });
+  }
+};
+
+const adminOnly = (req, res, next) =>
+  req.user.role === 'admin' ? next() : res.status(403).json({ error: 'Admin access required' });
+
+app.get('/api/health', async (_req, res) => {
+  let database = 'not-configured';
+  if (DB_CONFIGURED) {
+    try {
+      await query('SELECT 1');
+      database = 'connected';
+    } catch {
+      database = 'unavailable';
+    }
+  }
+  res.status(database === 'unavailable' ? 503 : 200).json({
+    ok: database !== 'unavailable',
+    database,
+    service: 'speakingbot-api',
+    uptime: Math.round(process.uptime()),
+    timestamp: new Date().toISOString()
+  });
+});
+
+app.post('/api/auth/register', async (req, res) => {
+  if (!DB_CONFIGURED) return res.status(503).json({ error: 'Database is not configured yet' });
+  try {
+    const { name, email, password } = req.body || {};
+    if (!name || !email || !password || String(password).length < 8)
+      return res.status(400).json({ error: 'Name, valid email and password of at least 8 characters are required' });
+    const normalized = String(email).toLowerCase().trim();
+    const exists = await query('SELECT id FROM users WHERE email=$1 LIMIT 1', [normalized]);
+    if (exists.rowCount) return res.status(409).json({ error: 'Email already registered' });
+    const passwordHash = await bcrypt.hash(String(password), 12);
+    const r = await query(
+      'INSERT INTO users(name,email,password_hash,role) VALUES($1,$2,$3,$4) RETURNING id,name,email,role',
+      [String(name).trim(), normalized, passwordHash, 'student']
+    );
+    const user = r.rows[0];
+    const token = jwt.sign({ sub: String(user.id), role: user.role }, JWT_SECRET, { expiresIn: '7d' });
+    res.status(201).json({ token, user: publicUser(user) });
+  } catch {
+    res.status(500).json({ error: 'Registration failed' });
+  }
+});
+
+app.post('/api/auth/login', async (req, res) => {
+  if (!DB_CONFIGURED) return res.status(503).json({ error: 'Database is not configured yet' });
+  try {
+    const { identifier, email, password } = req.body || {};
+    const rawIdentifier = String(identifier ?? email ?? '').trim();
+    const normalized = rawIdentifier.toLowerCase();
+    let r = await query(
+      'SELECT id,name,email,password_hash AS "passwordHash",role FROM users WHERE email=$1 LIMIT 1',
+      [normalized]
+    );
+    let user = r.rows[0];
+
+    if (!user && ADMIN_USERNAME && rawIdentifier === ADMIN_USERNAME && ADMIN_PASSWORD && String(password || '') === ADMIN_PASSWORD) {
+      const adminEmail = ADMIN_EMAIL || 'admin@vsbec.local';
+      r = await query(
+        'SELECT id,name,email,password_hash AS "passwordHash",role FROM users WHERE email=$1 LIMIT 1',
+        [adminEmail]
+      );
+      user = r.rows[0];
+      const hash = await bcrypt.hash(ADMIN_PASSWORD, 12);
+      if (!user) {
+        r = await query(
+          'INSERT INTO users(name,email,password_hash,role) VALUES($1,$2,$3,$4) RETURNING id,name,email,password_hash AS "passwordHash",role',
+          ['VSBEC Admin', adminEmail, hash, 'admin']
+        );
+        user = r.rows[0];
+      } else if (user.role !== 'admin') {
+        r = await query(
+          'UPDATE users SET role=$1,password_hash=$2,last_seen_at=NOW() WHERE id=$3 RETURNING id,name,email,password_hash AS "passwordHash",role',
+          ['admin', hash, user.id]
+        );
+        user = r.rows[0];
+      }
+    }
+
+    if (!user || !(await bcrypt.compare(String(password || ''), user.passwordHash)))
+      return res.status(401).json({ error: 'Invalid email/username or password' });
+
+    await query('UPDATE users SET last_seen_at=NOW() WHERE id=$1', [user.id]);
+    const token = jwt.sign({ sub: String(user.id), role: user.role }, JWT_SECRET, { expiresIn: '7d' });
+    res.json({ token, user: publicUser(user) });
+  } catch {
+    res.status(500).json({ error: 'Login failed' });
+  }
+});
+
+app.get('/api/tests', async (req, res) => {
+  if (!DB_CONFIGURED) return res.json({ tests: [], databaseConfigured: false });
+  try {
+    const category = String(req.query.category || '').trim();
+    const q = String(req.query.q || '').trim();
+    const params = [];
+    const where = ['t.published=TRUE'];
+    if (category) { params.push(category); where.push(`t.category=$${params.length}`); }
+    if (q) {
+      params.push(`%${q}%`);
+      where.push(`(t.title ILIKE $${params.length} OR t.topic ILIKE $${params.length} OR t.category ILIKE $${params.length})`);
+    }
+    const r = await query(`
+      SELECT t.*,
+        (SELECT COUNT(*)::int FROM questions q WHERE q.test_id=t.test_id AND q.published=TRUE) AS questions,
+        (SELECT COUNT(*)::int FROM attempts a WHERE a.test_id=t.test_id) AS attempts
+      FROM tests t WHERE ${where.join(' AND ')} ORDER BY t.created_at DESC
+    `, params);
+    res.json({ tests: r.rows });
+  } catch {
+    res.status(500).json({ error: 'Could not load tests' });
+  }
+});
+
+app.get('/api/tests/:testId', async (req, res) => {
+  if (!DB_CONFIGURED) return res.status(503).json({ error: 'Database not configured yet' });
+  try {
+    const t = await query('SELECT * FROM tests WHERE test_id=$1 AND published=TRUE LIMIT 1', [req.params.testId]);
+    if (!t.rowCount) return res.status(404).json({ error: 'Test not found' });
+    const q = await query('SELECT id,test_id AS "testId",text,options,answer,explanation,topic,difficulty,published,created_at AS "createdAt",updated_at AS "updatedAt" FROM questions WHERE test_id=$1 AND published=TRUE ORDER BY id', [req.params.testId]);
+    res.json({ test: t.rows[0], questions: q.rows.map(publicQuestion) });
+  } catch {
+    res.status(500).json({ error: 'Could not load test' });
+  }
+});
+
+app.get('/api/me', auth, (req, res) => res.json({ user: publicUser(req.user) }));
+app.post('/api/heartbeat', auth, async (req, res) => {
+  await query('UPDATE users SET last_seen_at=NOW() WHERE id=$1', [req.user.id]);
+  res.json({ ok: true });
+});
+
+app.post('/api/attempts/submit', auth, async (req, res) => {
+  try {
+    const { testId, answers, durationSeconds } = req.body || {};
+    if (!testId || !answers || typeof answers !== 'object') return res.status(400).json({ error: 'Invalid submission' });
+    const qr = await query('SELECT id,answer FROM questions WHERE test_id=$1 AND published=TRUE', [testId]);
+    if (!qr.rowCount) return res.status(404).json({ error: 'Test questions not found' });
+    let correct = 0;
+    for (const q of qr.rows) {
+      if (Number(answers[q.id]) === q.answer || Number(answers[q._id]) === q.answer) correct++;
+    }
+    const maxScore = qr.rowCount;
+    const answered = Object.keys(answers).length;
+    const duration = Math.max(0, Number(durationSeconds || 0));
+    const ar = await query(`
+      INSERT INTO attempts(user_id,test_id,score,max_score,percentage,duration_seconds)
+      VALUES($1,$2,$3,$4,$5,$6)
+      RETURNING id, user_id AS "userId", test_id AS "testId", score, max_score AS "maxScore",
+      percentage, duration_seconds AS "durationSeconds", completed_at AS "completedAt"
+    `, [req.user.id, testId, correct, maxScore, Math.round(correct / maxScore * 100), duration]);
+    res.status(201).json({
+      attempt: ar.rows[0],
+      correct,
+      answered,
+      skipped: Math.max(0, maxScore - answered),
+      questions: maxScore
+    });
+  } catch {
+    res.status(500).json({ error: 'Could not submit attempt' });
+  }
+});
+
+app.get('/api/my/attempts', auth, async (req, res) => {
+  const r = await query(`
+    SELECT id,user_id AS "userId",test_id AS "testId",score,max_score AS "maxScore",
+    percentage,duration_seconds AS "durationSeconds",completed_at AS "completedAt"
+    FROM attempts WHERE user_id=$1 ORDER BY completed_at DESC LIMIT 100
+  `, [req.user.id]);
+  res.json({ attempts: r.rows });
+});
+
+app.get('/api/my/scheduled-tests', auth, async (req, res) => {
+  const r = await query(`
+    SELECT a.id,a.email,a.test_id AS "testId",a.start_at AS "startAt",a.end_at AS "endAt",
+    a.label,a.active,t.title,t.category,t.topic,t.difficulty,t.duration,t.premium
+    FROM assessment_access a
+    LEFT JOIN tests t ON t.test_id=a.test_id
+    WHERE a.email=$1 AND a.active=TRUE AND a.end_at>=NOW()
+    ORDER BY a.start_at
+  `, [req.user.email]);
+  res.json({ tests: r.rows.map(x => ({ ...x, _id: x.id, test: x.title ? {
+    testId:x.testId,title:x.title,category:x.category,topic:x.topic,difficulty:x.difficulty,duration:x.duration,premium:x.premium
+  } : null, accessPasswordRequired:true })) });
+});
+
+app.post('/api/scheduled-tests/:id/verify', auth, async (req, res) => {
+  try {
+    const r = await query(`
+      SELECT a.*,t.title,t.category,t.topic,t.difficulty,t.duration,t.premium,t.published
+      FROM assessment_access a JOIN tests t ON t.test_id=a.test_id
+      WHERE a.id=$1 AND a.email=$2 AND a.active=TRUE LIMIT 1
+    `, [req.params.id, req.user.email]);
+    if (!r.rowCount) return res.status(404).json({ error: 'Assessment access not found' });
+    const a = r.rows[0];
+    const now = new Date();
+    if (now < new Date(a.start_at)) return res.status(403).json({ error:'Assessment has not started yet', startAt:a.start_at });
+    if (now > new Date(a.end_at)) return res.status(403).json({ error:'Assessment access has expired', endAt:a.end_at });
+    if (!(await bcrypt.compare(String(req.body?.password || ''), a.access_password_hash)))
+      return res.status(401).json({ error:'Incorrect assessment access password' });
+    const qr = await query('SELECT id,test_id AS "testId",text,options,answer,explanation,topic,difficulty,published FROM questions WHERE test_id=$1 AND published=TRUE ORDER BY id', [a.test_id]);
+    res.json({
+      accessId:a.id,
+      test:{testId:a.test_id,title:a.title,category:a.category,topic:a.topic,difficulty:a.difficulty,duration:a.duration,premium:a.premium},
+      questions:qr.rows.map(publicQuestion),
+      window:{startAt:a.start_at,endAt:a.end_at}
+    });
+  } catch {
+    res.status(500).json({ error:'Could not verify assessment access' });
+  }
+});
+
+app.get('/api/admin/schedules', auth, adminOnly, async (_req, res) => {
+  const r = await query(`
+    SELECT a.id,a.email,a.test_id AS "testId",a.start_at AS "startAt",a.end_at AS "endAt",
+    a.label,a.active,a.created_at AS "createdAt",u.name AS "createdByName",u.email AS "createdByEmail"
+    FROM assessment_access a LEFT JOIN users u ON u.id=a.created_by ORDER BY a.start_at
+  `);
+  res.json({ schedules:r.rows.map(x=>({...x,_id:x.id,createdBy:x.createdByName?{name:x.createdByName,email:x.createdByEmail}:null})) });
+});
+
+app.post('/api/admin/schedules', auth, adminOnly, async (req, res) => {
+  try {
+    const { email,testId,startAt,endAt,password,label } = req.body || {};
+    if (!email || !testId || !startAt || !endAt || !password || String(password).length < 6)
+      return res.status(400).json({error:'Email, test, start/end time and a 6+ character access password are required'});
+    const start = new Date(startAt), end = new Date(endAt);
+    if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime()) || end <= start)
+      return res.status(400).json({error:'Invalid assessment time window'});
+    if (!(await query('SELECT 1 FROM tests WHERE test_id=$1 LIMIT 1',[testId])).rowCount)
+      return res.status(404).json({error:'Test not found'});
+    const hash = await bcrypt.hash(String(password),12);
+    const r = await query(`
+      INSERT INTO assessment_access(email,test_id,start_at,end_at,access_password_hash,label,created_by)
+      VALUES($1,$2,$3,$4,$5,$6,$7)
+      RETURNING id,email,test_id AS "testId",start_at AS "startAt",end_at AS "endAt",label
+    `, [String(email).toLowerCase().trim(),testId,start,end,hash,label||'Company Assessment',req.user.id]);
+    res.status(201).json({schedule:{...r.rows[0],_id:r.rows[0].id},accessPassword:String(password)});
+  } catch {
+    res.status(400).json({error:'Could not create scheduled assessment'});
+  }
+});
+
+app.delete('/api/admin/schedules/:id', auth, adminOnly, async (req,res) => {
+  const r = await query('DELETE FROM assessment_access WHERE id=$1 RETURNING id',[req.params.id]);
+  if (!r.rowCount) return res.status(404).json({error:'Schedule not found'});
+  res.json({ok:true});
+});
+
+app.get('/api/admin/metrics', auth, adminOnly, async (_req,res) => {
+  const r = await Promise.all([
+    query('SELECT COUNT(*)::int AS count FROM users'),
+    query('SELECT COUNT(*)::int AS count FROM users WHERE last_seen_at>=NOW()-INTERVAL \'5 minutes\''),
+    query('SELECT COUNT(*)::int AS count FROM attempts'),
+    query(`
+      SELECT a.id,a.test_id AS "testId",a.score,a.max_score AS "maxScore",a.percentage,
+      a.duration_seconds AS "durationSeconds",a.completed_at AS "completedAt",
+      u.id AS "userId",u.name AS "userName",u.email AS "userEmail"
+      FROM attempts a JOIN users u ON u.id=a.user_id
+      WHERE a.completed_at>=NOW()-INTERVAL '24 hours'
+      ORDER BY a.completed_at DESC LIMIT 20
+    `),
+    query('SELECT id,name,email,role,last_seen_at AS "lastSeenAt",created_at AS "createdAt" FROM users ORDER BY last_seen_at DESC LIMIT 5000'),
+    query('SELECT COUNT(*)::int AS count FROM assessment_access WHERE active=TRUE AND end_at>=NOW()')
+  ]);
+  res.json({
+    totalUsers:r[0].rows[0].count,
+    activeUsers:r[1].rows[0].count,
+    totalAttempts:r[2].rows[0].count,
+    recentAttempts:r[3].rows,
+    students:r[4].rows,
+    scheduledTests:r[5].rows[0].count,
+    generatedAt:new Date().toISOString()
+  });
+});
+
+app.get('/api/admin/tests', auth, adminOnly, async (_req,res) => {
+  const r = await query('SELECT * FROM tests ORDER BY created_at DESC');
+  res.json({tests:r.rows});
+});
+
+app.post('/api/admin/tests', auth, adminOnly, async (req,res) => {
+  try {
+    const {testId,title,category,topic,difficulty,duration,premium,published} = req.body || {};
+    if (!testId || !title) return res.status(400).json({error:'testId and title are required'});
+    const r = await query(`
+      INSERT INTO tests(test_id,title,category,topic,difficulty,duration,premium,published)
+      VALUES($1,$2,$3,$4,$5,$6,$7,$8)
+      RETURNING *
+    `,[testId,title,category||null,topic||null,difficulty||'Medium',Number(duration||15),Boolean(premium),published!==false]);
+    res.status(201).json({test:r.rows[0]});
+  } catch(e) {
+    res.status(400).json({error:e.code==='23505'?'Test ID already exists':'Could not create test'});
+  }
+});
+
+app.patch('/api/admin/tests/:testId', auth, adminOnly, async (req,res) => {
+  const allowed=['title','category','topic','difficulty','duration','premium','published'];
+  const fields=[],params=[];
+  for(const key of allowed) if(req.body?.[key]!==undefined){params.push(req.body[key]);fields.push(`${key}=$${params.length}`);}
+  if(!fields.length) return res.status(400).json({error:'No supported fields to update'});
+  params.push(req.params.testId);
+  const r=await query(`UPDATE tests SET ${fields.join(',')},updated_at=NOW() WHERE test_id=$${params.length} RETURNING *`,params);
+  if(!r.rowCount) return res.status(404).json({error:'Test not found'});
+  res.json({test:r.rows[0]});
+});
+
+app.delete('/api/admin/tests/:testId', auth, adminOnly, async (req,res) => {
+  const r=await query('DELETE FROM tests WHERE test_id=$1 RETURNING test_id',[req.params.testId]);
+  if(!r.rowCount) return res.status(404).json({error:'Test not found'});
+  res.json({ok:true});
+});
+
+app.get('/api/admin/tests/:testId/questions', auth, adminOnly, async (req,res) => {
+  const r=await query('SELECT id,test_id AS "testId",text,options,answer,explanation,topic,difficulty,published,created_at AS "createdAt",updated_at AS "updatedAt" FROM questions WHERE test_id=$1 ORDER BY id',[req.params.testId]);
+  res.json({questions:r.rows.map(publicQuestion)});
+});
+
+app.post('/api/admin/tests/:testId/questions', auth, adminOnly, async (req,res) => {
+  try {
+    const {text,options,answer,explanation,topic,difficulty,published}=req.body||{};
+    if(!text || !Array.isArray(options) || options.length<2 || answer===undefined)
+      return res.status(400).json({error:'Question text, at least two options and an answer are required'});
+    const r=await query(`
+      INSERT INTO questions(test_id,text,options,answer,explanation,topic,difficulty,published)
+      VALUES($1,$2,$3::jsonb,$4,$5,$6,$7,$8)
+      RETURNING id,test_id AS "testId",text,options,answer,explanation,topic,difficulty,published,created_at AS "createdAt",updated_at AS "updatedAt"
+    `,[req.params.testId,text,JSON.stringify(options),Number(answer),explanation||null,topic||null,difficulty||null,published!==false]);
+    res.status(201).json({question:publicQuestion(r.rows[0])});
+  } catch {
+    res.status(400).json({error:'Could not create question'});
+  }
+});
+
+app.patch('/api/admin/questions/:id', auth, adminOnly, async (req,res) => {
+  const allowed=['text','options','answer','explanation','topic','difficulty','published'];
+  const fields=[],params=[];
+  for(const key of allowed) if(req.body?.[key]!==undefined){
+    params.push(key==='options'?JSON.stringify(req.body[key]):req.body[key]);
+    fields.push(key==='options'?`options=$${params.length}::jsonb`:`${key}=$${params.length}`);
+  }
+  if(!fields.length) return res.status(400).json({error:'No supported fields to update'});
+  params.push(req.params.id);
+  const r=await query(`UPDATE questions SET ${fields.join(',')},updated_at=NOW() WHERE id=$${params.length} RETURNING id,test_id AS "testId",text,options,answer,explanation,topic,difficulty,published,created_at AS "createdAt",updated_at AS "updatedAt"`,params);
+  if(!r.rowCount) return res.status(404).json({error:'Question not found'});
+  res.json({question:publicQuestion(r.rows[0])});
+});
+
+app.delete('/api/admin/questions/:id', auth, adminOnly, async (req,res) => {
+  const r=await query('DELETE FROM questions WHERE id=$1 RETURNING id',[req.params.id]);
+  if(!r.rowCount) return res.status(404).json({error:'Question not found'});
+  res.json({ok:true});
+});
+
+app.get('/api/admin/users', auth, adminOnly, async (_req,res) => {
+  const r=await query('SELECT id,name,email,role,last_seen_at AS "lastSeenAt",created_at AS "createdAt" FROM users ORDER BY last_seen_at DESC LIMIT 5000');
+  res.json({users:r.rows});
+});
+
 const dist=path.resolve(__dirname,'../dist');
 app.use(express.static(dist));
-app.get('*',(req,res)=>{ if(req.path.startsWith('/api/')) return res.status(404).json({error:'API route not found'}); res.sendFile(path.join(dist,'index.html')); });
+app.get('*',(req,res)=>{
+  if(req.path.startsWith('/api/')) return res.status(404).json({error:'API route not found'});
+  res.sendFile(path.join(dist,'index.html'));
+});
 
-async function seedDemo(){if(process.env.SEED_DEMO!=='true')return;const existing=await Test.countDocuments();if(existing)return;const tests=[{testId:'apt-1',title:'Quantitative Aptitude — Placement Set 01',category:'Aptitude',topic:'Quantitative Aptitude',difficulty:'Medium',questions:20,duration:20},{testId:'sql-1',title:'SQL & DBMS Interview Challenge',category:'Technical',topic:'SQL',difficulty:'Medium',duration:15},{testId:'java-1',title:'Java OOP Mastery Test',category:'Technical',topic:'Java',difficulty:'Hard',duration:25},{testId:'logic-1',title:'Logical Reasoning — Fast Track',category:'Reasoning',topic:'Logical Reasoning',difficulty:'Easy',duration:12},{testId:'python-1',title:'Python Coding Fundamentals',category:'Technical',topic:'Python',difficulty:'Medium',duration:20},{testId:'verbal-1',title:'Verbal Ability & Grammar Sprint',category:'Verbal',topic:'Verbal Ability',difficulty:'Easy',duration:15}];await Test.insertMany(tests);await Question.insertMany([{testId:'sql-1',text:'Which SQL clause filters grouped records?',options:['WHERE','HAVING','ORDER BY','LIMIT'],answer:1,explanation:'HAVING filters groups after GROUP BY.',topic:'SQL',difficulty:'Medium'},{testId:'java-1',text:'Which OOP principle allows the same method name to behave differently?',options:['Encapsulation','Inheritance','Polymorphism','Abstraction'],answer:2,explanation:'Polymorphism supports different implementations through a common interface.',topic:'OOP',difficulty:'Medium'},{testId:'python-1',text:'Which Python collection stores key-value pairs?',options:['List','Tuple','Set','Dictionary'],answer:3,explanation:'A dictionary stores key-value pairs.',topic:'Python',difficulty:'Easy'}])}
-async function start(){if(DB_CONFIGURED){try{await mongoose.connect(MONGO_URI,{maxPoolSize:Number(process.env.DB_POOL_SIZE||30),minPoolSize:5,serverSelectionTimeoutMS:5000});await seedDemo();console.log('MongoDB connected')}catch(e){console.error('Database connection failed:',e.message);}}else{console.log('MongoDB not configured; running frontend/public preview mode')}app.listen(PORT,()=>console.log('SpeakingBot API listening on '+PORT))}start();
+async function start() {
+  if (DB_CONFIGURED) {
+    try {
+      await query('SELECT 1');
+      await ensureSchema();
+      await seedDemo();
+      console.log('PostgreSQL connected and schema ready');
+    } catch (e) {
+      console.error('Database startup failed:', e.message);
+      process.exitCode = 1;
+    }
+  } else {
+    console.log('DATABASE_URL not configured; running frontend/public preview mode');
+  }
+  app.listen(PORT, () => console.log('SpeakingBot API listening on ' + PORT));
+}
+start();

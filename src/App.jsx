@@ -80,7 +80,9 @@ function App() {
     setPage('test');
   };
 
-  const startScheduled = (data) => { const test={...data.test,id:data.test.testId,questions:data.questions.length,questionsData:data.questions}; setActiveTest(test); setQuestions(data.questions); setAttempt({index:0,answers:{},marked:[],visited:[1],started:Date.now(),seconds:test.duration*60}); setPage('test'); localStorage.removeItem('sb-scheduled-access'); };\n\n  const submitTest = (answers) => {
+  const startScheduled = (data) => { const test={...data.test,id:data.test.testId,questions:data.questions.length,questionsData:data.questions}; setActiveTest(test); setQuestions(data.questions); setAttempt({index:0,answers:{},marked:[],visited:[1],started:Date.now(),seconds:test.duration*60}); setPage('test'); localStorage.removeItem('sb-scheduled-access'); };
+
+  const submitTest = (answers) => {
     const activeQuestions = activeTest?.questionsData || questions;
     const correct = activeQuestions.filter(q => answers[q._id||q.id] === q.answer || answers[q._id] === q.answer).length;
     const answered = Object.keys(answers).length;

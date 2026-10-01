@@ -16,6 +16,7 @@ const PORT=Number(process.env.PORT||5000);
 const MONGO_URI=process.env.MONGO_URI;
 const JWT_SECRET=process.env.JWT_SECRET||'speakingbot-preview-secret-change-before-production';
 const CLIENT_ORIGIN=process.env.CLIENT_ORIGIN||'*';
+const ADMIN_USERNAME=(process.env.ADMIN_USERNAME||'').trim();
 const ADMIN_EMAIL=(process.env.ADMIN_EMAIL||'').toLowerCase();
 const ADMIN_PASSWORD=process.env.ADMIN_PASSWORD||'';
 const DB_CONFIGURED=Boolean(MONGO_URI);
@@ -40,7 +41,16 @@ const auth=async(req,res,next)=>{try{const token=(req.headers.authorization||'')
 const adminOnly=(req,res,next)=>req.user.role==='admin'?next():res.status(403).json({error:'Admin access required'});
 app.get('/api/health',async(_req,res)=>{const db=mongoose.connection.readyState===1;res.status(200).json({ok:true,database:db?'connected':'not-configured',service:'speakingbot-api',uptime:Math.round(process.uptime()),timestamp:new Date().toISOString()})});
 app.post('/api/auth/register',async(req,res)=>{try{const{name,email,password}=req.body||{};if(!name||!email||!password||password.length<8)return res.status(400).json({error:'Name, valid email and password of at least 8 characters are required'});const normalized=String(email).toLowerCase().trim();if(await User.exists({email:normalized}))return res.status(409).json({error:'Email already registered'});const passwordHash=await bcrypt.hash(password,12);const role='student';const user=await User.create({name,email:normalized,passwordHash,role,lastSeenAt:new Date()});const token=jwt.sign({sub:user._id.toString(),role},JWT_SECRET,{expiresIn:'7d'});res.status(201).json({token,user:{id:user._id,name:user.name,email:user.email,role}})}catch{res.status(500).json({error:'Registration failed'})}});
-app.post('/api/auth/login',async(req,res)=>{try{const{email,password}=req.body||{};const normalized=String(email||'').toLowerCase().trim();let user=await User.findOne({email:normalized});if(!user&&ADMIN_EMAIL&&normalized===ADMIN_EMAIL&&ADMIN_PASSWORD&&password===ADMIN_PASSWORD){const passwordHash=await bcrypt.hash(ADMIN_PASSWORD,12);user=await User.create({name:'Administrator',email:normalized,passwordHash,role:'admin',lastSeenAt:new Date()})}if(!user||!(await bcrypt.compare(password||'',user.passwordHash)))return res.status(401).json({error:'Invalid email or password'});user.lastSeenAt=new Date();await user.save();const token=jwt.sign({sub:user._id.toString(),role:user.role},JWT_SECRET,{expiresIn:'7d'});res.json({token,user:{id:user._id,name:user.name,email:user.email,role:user.role}})}catch{res.status(500).json({error:'Login failed'})}});
+app.post('/api/auth/login',async(req,res)=>{try{const{identifier,email,password}=req.body||{};const rawIdentifier=String(identifier??email??'').trim();const normalized=rawIdentifier.toLowerCase();let user=await User.findOne({email:normalized});
+  if(!user&&ADMIN_USERNAME&&rawIdentifier===ADMIN_USERNAME&&ADMIN_PASSWORD&&password===ADMIN_PASSWORD){
+    const adminEmail=ADMIN_EMAIL||'admin@vsbec.local';
+    user=await User.findOne({email:adminEmail});
+    if(!user){const passwordHash=await bcrypt.hash(ADMIN_PASSWORD,12);user=await User.create({name:'VSBEC Admin',email:adminEmail,passwordHash,role:'admin',lastSeenAt:new Date()});}
+    else if(user.role!=='admin'){user.role='admin';user.passwordHash=await bcrypt.hash(ADMIN_PASSWORD,12);await user.save();}
+  }
+  if(!user||!(await bcrypt.compare(password||'',user.passwordHash)))return res.status(401).json({error:'Invalid email/username or password'});
+  user.lastSeenAt=new Date();await user.save();const token=jwt.sign({sub:user._id.toString(),role:user.role},JWT_SECRET,{expiresIn:'7d'});res.json({token,user:{id:user._id,name:user.name,email:user.email,role:user.role}});
+}catch{res.status(500).json({error:'Login failed'})}});
 app.get('/api/tests',async(req,res)=>{ if(!DB_CONFIGURED)return res.json({tests:[],databaseConfigured:false});
   const category=req.query.category; const q=String(req.query.q||'').trim();
   const filter={published:true}; if(category) filter.category=category;

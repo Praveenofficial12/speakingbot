@@ -1,20 +1,33 @@
+databases:
+  - name: speakingbot-db
+    databaseName: speakingbot_db
+    user: speakingbot_db_user
+    plan: free
+    region: singapore
+    postgresMajorVersion: "18"
+
 services:
   - type: web
     name: speakingbot
     runtime: node
+    plan: free
     buildCommand: npm install && npm run build
     startCommand: npm start
     healthCheckPath: /api/health
     envVars:
-      - key: MONGO_URI
-        sync: false
+      - key: DATABASE_URL
+        fromDatabase:
+          name: speakingbot-db
+          property: connectionString
       - key: JWT_SECRET
         generateValue: true
+      - key: ADMIN_USERNAME
+        sync: false
       - key: ADMIN_EMAIL
         sync: false
       - key: ADMIN_PASSWORD
         sync: false
       - key: CLIENT_ORIGIN
-        value: https://speakingbot.onrender.com
+        value: https://speakingbot-ahbf.onrender.com
       - key: DB_POOL_SIZE
-        value: "30"
+        value: "20"

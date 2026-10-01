@@ -1,9 +1,9 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import {
   ArrowRight, BarChart3, Bell, Bookmark, BookOpen, BrainCircuit, Check,
-  ChevronLeft, ChevronRight, CircleHelp, Clock3, Code2, FileQuestion,
-  Flame, Grid2X2, LayoutDashboard, Menu, Moon, Play, Plus, Search,
-  Settings, ShieldCheck, Sparkles, Sun, Target, Trophy, UserRound, X, Zap
+  Calendar, ChevronLeft, ChevronRight, CircleHelp, Clock3, Code2, FileQuestion,
+  Flame, Grid2X2, KeyRound, LayoutDashboard, Mail, Menu, Moon, Play, Plus, Search,
+  Settings, ShieldCheck, Sparkles, Sun, Target, Trash2, Trophy, UserRound, X, Zap
 } from 'lucide-react';
 
 const API = import.meta.env.VITE_API_URL || '/api';
@@ -106,6 +106,7 @@ function App() {
       {page === 'home' && <Home navigate={navigate} startTest={startTest} />}
       {page === 'tests' && <Tests navigate={navigate} startTest={startTest} search={search} />}
       {page === 'dashboard' && <Dashboard navigate={navigate} lastResult={lastResult} user={user} />}
+      {page === 'scheduled' && <ScheduledTests user={user} navigate={navigate} />}
       {page === 'test' && attempt && <TestEngine attempt={attempt} setAttempt={setAttempt} activeTest={activeTest} questions={questions} submitTest={submitTest} navigate={navigate} />}
       {page === 'result' && <Result result={lastResult} questions={questions} navigate={navigate} startTest={startTest} />}
       {page === 'bookmarks' && <Bookmarks bookmarks={bookmarks} setBookmarks={setBookmarks} navigate={navigate} />}
@@ -123,9 +124,9 @@ function Header({ dark, setDark, page, navigate, search, setSearch, mobileOpen, 
       <div className="header-inner">
         <button className="brand" onClick={() => navigate('home')}><span className="brand-mark"><BrainCircuit size={20}/></span><span>Speaking<span>Bot</span></span></button>
         <nav className={mobileOpen ? 'nav open' : 'nav'}>
-          {['home','tests','dashboard','bookmarks'].map(item =>
+          {['home','tests','dashboard','bookmarks','scheduled'].map(item =>
             <button key={item} className={page === item ? 'active' : ''} onClick={() => navigate(item)}>
-              {item === 'home' ? 'Home' : item === 'tests' ? 'Practice Tests' : item === 'dashboard' ? 'Dashboard' : 'Bookmarks'}
+              {item === 'home' ? 'Home' : item === 'tests' ? 'Practice Tests' : item === 'dashboard' ? 'Dashboard' : item === 'scheduled' ? 'Assessments' : 'Bookmarks'}
             </button>
           )}
           {user?.role==='admin' && <button onClick={() => navigate('admin')}>Admin</button>}
@@ -250,22 +251,40 @@ function Bookmarks({bookmarks,setBookmarks,navigate}) {
 }
 
 function Admin({navigate,user}) {
-  const [tab,setTab]=useState('overview'); const [metrics,setMetrics]=useState(null); const [error,setError]=useState('');
-  const load=async()=>{try{setError('');setMetrics(await api('/admin/metrics'))}catch(e){setError(e.message)}};
-  useEffect(()=>{load(); const id=setInterval(load,15000); return()=>clearInterval(id)},[]);
+  const [tab,setTab]=useState('overview'); const [metrics,setMetrics]=useState(null); const [schedules,setSchedules]=useState([]); const [tests,setTests]=useState([]); const [error,setError]=useState('');
+  const [form,setForm]=useState({email:'',testId:'',startAt:'',endAt:'',password:'',label:'Company Assessment'}); const [created,setCreated]=useState(null); const [busy,setBusy]=useState(false);
+  const load=async()=>{try{setError('');const [m,t,s]=await Promise.all([api('/admin/metrics'),api('/admin/tests'),api('/admin/schedules')]);setMetrics(m);setTests(t.tests||[]);setSchedules(s.schedules||[])}catch(e){setError(e.message)}};
+  useEffect(()=>{if(user?.role==='admin'){load();const id=setInterval(load,15000);return()=>clearInterval(id)}},[user]);
   if(!user) return <main className="container page-pad"><Empty icon={<ShieldCheck/>} title="Admin sign-in required" text="Sign in with the configured admin email to monitor users." action={()=>navigate('login')} actionText="Sign in"/></main>;
   if(user.role!=='admin') return <main className="container page-pad"><Empty icon={<ShieldCheck/>} title="Admin access required" text="Your account does not have administrator access." action={()=>navigate('home')} actionText="Go home"/></main>;
   if(error) return <main className="container page-pad"><Empty icon={<ShieldCheck/>} title="Admin access unavailable" text={error} action={load} actionText="Retry"/></main>;
+  const submitSchedule=async e=>{e.preventDefault();setBusy(true);setCreated(null);try{const d=await api('/admin/schedules',{method:'POST',body:JSON.stringify(form)});setCreated(d);setForm({...form,email:'',password:''});await load()}catch(e){setError(e.message)}finally{setBusy(false)}};
+  const remove=async id=>{if(!confirm('Remove this assessment access?'))return;try{await api('/admin/schedules/'+id,{method:'DELETE'});load()}catch(e){setError(e.message)}};
   const active=metrics?.activeUsers||0;
-  return <main className="container page-pad"><div className="admin-head"><div><div className="kicker">Live operations</div><h1>Admin monitoring.</h1><p>Live user activity, attempts and platform health.</p></div><span className="admin-badge"><ShieldCheck size={16}/> Protected admin</span></div>
-    <div className="stats-grid">{[['Total users',metrics?.totalUsers||0,'Registered',<UserRound/>],['Active now',active,'Seen in last 5 min',<Zap/>],['Attempts',metrics?.totalAttempts||0,'All time',<BarChart3/>],['API status','LIVE','Auto-refresh 15s',<Check/>]].map(([a,b,c,i])=><div className="metric" key={a}><span>{i}</span><small>{a}</small><strong>{b}</strong><em>{c}</em></div>)}</div>
-    <div className="admin-tabs">{['overview','users','attempts'].map(x=><button className={tab===x?'selected':''} key={x} onClick={()=>setTab(x)}>{x[0].toUpperCase()+x.slice(1)}</button>)}</div>
-    <section className="panel admin-table"><div className="panel-head"><div><small>Live data</small><h3>{tab==='users'?'User directory':tab==='attempts'?'Recent attempts':'Platform activity'}</h3></div><button className="text-btn" onClick={load}>Refresh <ArrowRight size={15}/></button></div>
-    {tab==='overview' && <><div className="success-banner"><Check size={18}/><span><b>{active}</b> users have been active within the last 5 minutes. Monitoring refreshes automatically.</span></div><div className="activity-list">{(metrics?.recentAttempts||[]).slice(0,10).map((a,i)=><div className="activity" key={a._id||i}><span className="activity-icon"><Check size={17}/></span><div><b>{a.userId?.name||'Student'}</b><small>{a.testId} · {a.percentage}%</small></div><strong>{a.score}/{a.maxScore}</strong></div>)}</div></>}
-    {tab==='users' && (metrics?.students||[]).map((u,i)=><div className="admin-row" key={u._id}><span className="rank">{i+1}</span><div><b>{u.name}</b><small>{u.email} · {u.role}</small></div><strong>{u.lastSeenAt?new Date(u.lastSeenAt).toLocaleString():'Never'}</strong></div>)}
-    {tab==='attempts' && (metrics?.recentAttempts||[]).map((a,i)=><div className="admin-row" key={a._id}><span className="rank">{i+1}</span><div><b>{a.userId?.name||'Student'} · {a.testId}</b><small>{new Date(a.completedAt).toLocaleString()}</small></div><strong>{a.percentage}%</strong></div>)}
-    </section></main>;
+  return <main className="container page-pad"><div className="admin-head"><div><div className="kicker">Company assessment operations</div><h1>Admin control center.</h1><p>Monitor students, publish tests and control scheduled assessment access.</p></div><span className="admin-badge"><ShieldCheck size={16}/> Protected admin</span></div>
+    <div className="stats-grid">{[['Total users',metrics?.totalUsers||0,'Registered',<UserRound/>],['Active now',active,'Seen in last 5 min',<Zap/>],['Attempts',metrics?.totalAttempts||0,'All time',<BarChart3/>],['Scheduled',metrics?.scheduledTests||schedules.length,'Active assignments',<Calendar/>]].map(([a,b,c,i])=><div className="metric" key={a}><span>{i}</span><small>{a}</small><strong>{b}</strong><em>{c}</em></div>)}</div>
+    <div className="admin-tabs">{['overview','users','attempts','schedules'].map(x=><button className={tab===x?'selected':''} key={x} onClick={()=>setTab(x)}>{x[0].toUpperCase()+x.slice(1)}</button>)}</div>
+    {tab==='schedules' ? <section className="dashboard-grid"><section className="panel"><div className="panel-head"><div><small>Company-style access</small><h3>Create scheduled assessment</h3></div></div>
+      <form className="admin-form" onSubmit={submitSchedule}><label><span><Mail size={14}/> Candidate email</span><input required type="email" value={form.email} onChange={e=>setForm({...form,email:e.target.value})} placeholder="candidate@company.com"/></label><label><span>Assessment</span><select required value={form.testId} onChange={e=>setForm({...form,testId:e.target.value})}><option value="">Select a test</option>{tests.map(t=><option key={t.testId} value={t.testId}>{t.title}</option>)}</select></label><label><span><Calendar size={14}/> Start time</span><input required type="datetime-local" value={form.startAt} onChange={e=>setForm({...form,startAt:e.target.value})}/></label><label><span><Calendar size={14}/> End time</span><input required type="datetime-local" value={form.endAt} onChange={e=>setForm({...form,endAt:e.target.value})}/></label><label><span><KeyRound size={14}/> Assessment password</span><input required minLength={6} value={form.password} onChange={e=>setForm({...form,password:e.target.value})} placeholder="Company access password"/></label><label><span>Label</span><input value={form.label} onChange={e=>setForm({...form,label:e.target.value})}/></label><button className="btn primary full" disabled={busy}>{busy?'Creating…':'Create assessment access'}</button></form>
+      {created&&<div className="success-banner"><Check size={18}/><span>Access created for <b>{created.schedule.email}</b>. Give the candidate this assessment password: <strong>{created.accessPassword}</strong></span></div>}
+    </section><section className="panel"><div className="panel-head"><div><small>Assignments</small><h3>Scheduled assessments</h3></div><button className="text-btn" onClick={load}>Refresh</button></div>{schedules.map(s=><div className="admin-row" key={s._id}><span className="rank"><Calendar size={15}/></span><div><b>{s.email}</b><small>{s.label} · {s.testId}</small><small>{new Date(s.startAt).toLocaleString()} → {new Date(s.endAt).toLocaleString()}</small></div><button className="icon-btn" title="Remove access" onClick={()=>remove(s._id)}><Trash2 size={16}/></button></div>)}{!schedules.length&&<p className="muted-copy">No scheduled assessments yet.</p>}</section></section>
+    : <section className="panel admin-table"><div className="panel-head"><div><small>Live data</small><h3>{tab==='users'?'Student directory':tab==='attempts'?'Recent attempts':'Platform activity'}</h3></div><button className="text-btn" onClick={load}>Refresh <ArrowRight size={15}/></button></div>
+      {tab==='overview'&&<><div className="success-banner"><Check size={18}/><span><b>{active}</b> students active in the last 5 minutes. Admin data refreshes every 15 seconds.</span></div>{(metrics?.recentAttempts||[]).slice(0,10).map((a,i)=><div className="activity" key={a._id||i}><span className="activity-icon"><Check size={17}/></span><div><b>{a.userId?.name||'Student'}</b><small>{a.userId?.email||''} · {a.testId} · {a.percentage}%</small></div><strong>{a.score}/{a.maxScore}</strong></div>)}</>}
+      {tab==='users'&&(metrics?.students||[]).map((u,i)=><div className="admin-row" key={u._id}><span className="rank">{i+1}</span><div><b>{u.name}</b><small>{u.email} · {u.role}</small></div><strong>{u.lastSeenAt?new Date(u.lastSeenAt).toLocaleString():'Never'}</strong></div>)}
+      {tab==='attempts'&&(metrics?.recentAttempts||[]).map((a,i)=><div className="admin-row" key={a._id}><span className="rank">{i+1}</span><div><b>{a.userId?.name||'Student'} · {a.testId}</b><small>{a.userId?.email||''} · {new Date(a.completedAt).toLocaleString()}</small></div><strong>{a.percentage}%</strong></div>)}
+    </section>}
+  </main>;
 }
+
+function ScheduledTests({user,navigate}) {
+  const [items,setItems]=useState([]); const [passwords,setPasswords]=useState({}); const [error,setError]=useState(''); const [busy,setBusy]=useState('');
+  const load=async()=>{try{setError('');const d=await api('/my/scheduled-tests');setItems(d.tests||[])}catch(e){setError(e.message)}};
+  useEffect(()=>{if(user)load()},[user]);
+  if(!user)return <main className="container page-pad"><Empty icon={<KeyRound/>} title="Sign in to view assessments" text="Company-assigned assessments are linked to your registered email." action={()=>navigate('login')} actionText="Sign in"/></main>;
+  const start=async item=>{try{setBusy(item._id);const d=await api('/scheduled-tests/'+item._id+'/verify',{method:'POST',body:JSON.stringify({password:passwords[item._id]||''})});localStorage.setItem('sb-scheduled-access',JSON.stringify({id:item._id,test:d.test,questions:d.questions,window:d.window}));navigate('tests')}catch(e){setError(e.message)}finally{setBusy('')}};
+  return <main className="container page-pad"><div className="page-hero"><div><div className="kicker">Company assessments</div><h1>Your scheduled tests.</h1><p>Use the assessment password provided by the company or placement team during the allowed time window.</p></div></div>{error&&<div className="error-text">{error}</div>}{items.length?<div className="test-grid">{items.map(item=><article className="test-card" key={item._id}><div className="test-card-top"><span className="pill purple">Scheduled</span><Calendar size={17}/></div><span className="test-category">{item.label} · {item.testId}</span><h3>{item.test?.title||'Assessment'}</h3><div className="test-info"><span><Calendar size={15}/>{new Date(item.startAt).toLocaleString()}</span><span>Until {new Date(item.endAt).toLocaleString()}</span></div><div className="auth-inline"><KeyRound size={16}/><input type="password" placeholder="Assessment password" value={passwords[item._id]||''} onChange={e=>setPasswords({...passwords,[item._id]:e.target.value})}/><button className="btn primary" disabled={busy===item._id} onClick={()=>start(item)}>{busy===item._id?'Checking…':'Enter'}</button></div></article>)}</div>:<Empty icon={<Calendar/>} title="No assigned assessments" text="If your company has scheduled a test, make sure you are signed in with the same email they used." action={()=>navigate('home')} actionText="Go home"/>}</main>;
+}
+
 
 function Auth({navigate,setUser}) {
   const [mode,setMode]=useState('login'); const [name,setName]=useState(''); const [email,setEmail]=useState(''); const [password,setPassword]=useState(''); const [error,setError]=useState(''); const [busy,setBusy]=useState(false);

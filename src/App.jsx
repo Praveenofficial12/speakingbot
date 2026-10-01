@@ -80,7 +80,7 @@ function App() {
     setPage('test');
   };
 
-  const submitTest = (answers) => {
+  const startScheduled = (data) => { const test={...data.test,id:data.test.testId,questions:data.questions.length,questionsData:data.questions}; setActiveTest(test); setQuestions(data.questions); setAttempt({index:0,answers:{},marked:[],visited:[1],started:Date.now(),seconds:test.duration*60}); setPage('test'); localStorage.removeItem('sb-scheduled-access'); };\n\n  const submitTest = (answers) => {
     const activeQuestions = activeTest?.questionsData || questions;
     const correct = activeQuestions.filter(q => answers[q._id||q.id] === q.answer || answers[q._id] === q.answer).length;
     const answered = Object.keys(answers).length;
@@ -106,7 +106,7 @@ function App() {
       {page === 'home' && <Home navigate={navigate} startTest={startTest} />}
       {page === 'tests' && <Tests navigate={navigate} startTest={startTest} search={search} />}
       {page === 'dashboard' && <Dashboard navigate={navigate} lastResult={lastResult} user={user} />}
-      {page === 'scheduled' && <ScheduledTests user={user} navigate={navigate} />}
+      {page === 'scheduled' && <ScheduledTests user={user} navigate={navigate} startScheduled={startScheduled} />}
       {page === 'test' && attempt && <TestEngine attempt={attempt} setAttempt={setAttempt} activeTest={activeTest} questions={questions} submitTest={submitTest} navigate={navigate} />}
       {page === 'result' && <Result result={lastResult} questions={questions} navigate={navigate} startTest={startTest} />}
       {page === 'bookmarks' && <Bookmarks bookmarks={bookmarks} setBookmarks={setBookmarks} navigate={navigate} />}
@@ -276,12 +276,12 @@ function Admin({navigate,user}) {
   </main>;
 }
 
-function ScheduledTests({user,navigate}) {
+function ScheduledTests({user,navigate,startScheduled}) {
   const [items,setItems]=useState([]); const [passwords,setPasswords]=useState({}); const [error,setError]=useState(''); const [busy,setBusy]=useState('');
   const load=async()=>{try{setError('');const d=await api('/my/scheduled-tests');setItems(d.tests||[])}catch(e){setError(e.message)}};
   useEffect(()=>{if(user)load()},[user]);
   if(!user)return <main className="container page-pad"><Empty icon={<KeyRound/>} title="Sign in to view assessments" text="Company-assigned assessments are linked to your registered email." action={()=>navigate('login')} actionText="Sign in"/></main>;
-  const start=async item=>{try{setBusy(item._id);const d=await api('/scheduled-tests/'+item._id+'/verify',{method:'POST',body:JSON.stringify({password:passwords[item._id]||''})});localStorage.setItem('sb-scheduled-access',JSON.stringify({id:item._id,test:d.test,questions:d.questions,window:d.window}));navigate('tests')}catch(e){setError(e.message)}finally{setBusy('')}};
+  const start=async item=>{try{setBusy(item._id);const d=await api('/scheduled-tests/'+item._id+'/verify',{method:'POST',body:JSON.stringify({password:passwords[item._id]||''})});startScheduled(d)}catch(e){setError(e.message)}finally{setBusy('')}};
   return <main className="container page-pad"><div className="page-hero"><div><div className="kicker">Company assessments</div><h1>Your scheduled tests.</h1><p>Use the assessment password provided by the company or placement team during the allowed time window.</p></div></div>{error&&<div className="error-text">{error}</div>}{items.length?<div className="test-grid">{items.map(item=><article className="test-card" key={item._id}><div className="test-card-top"><span className="pill purple">Scheduled</span><Calendar size={17}/></div><span className="test-category">{item.label} · {item.testId}</span><h3>{item.test?.title||'Assessment'}</h3><div className="test-info"><span><Calendar size={15}/>{new Date(item.startAt).toLocaleString()}</span><span>Until {new Date(item.endAt).toLocaleString()}</span></div><div className="auth-inline"><KeyRound size={16}/><input type="password" placeholder="Assessment password" value={passwords[item._id]||''} onChange={e=>setPasswords({...passwords,[item._id]:e.target.value})}/><button className="btn primary" disabled={busy===item._id} onClick={()=>start(item)}>{busy===item._id?'Checking…':'Enter'}</button></div></article>)}</div>:<Empty icon={<Calendar/>} title="No assigned assessments" text="If your company has scheduled a test, make sure you are signed in with the same email they used." action={()=>navigate('home')} actionText="Go home"/>}</main>;
 }
 

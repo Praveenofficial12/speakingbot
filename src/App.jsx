@@ -62,6 +62,14 @@ function App() {
     localStorage.setItem('sb-bookmarks', JSON.stringify(bookmarks));
   }, [bookmarks]);
 
+  useEffect(() => {
+    if (!user || !localStorage.getItem('sb-token')) return;
+    const heartbeat = () => api('/heartbeat', { method: 'POST' }).catch(() => {});
+    heartbeat();
+    const id = setInterval(heartbeat, 60000);
+    return () => clearInterval(id);
+  }, [user]);
+
   const navigate = (next) => { setPage(next); setMobileOpen(false); window.scrollTo({ top: 0, behavior: 'smooth' }); };
 
   const startTest = (test = TESTS[0]) => {

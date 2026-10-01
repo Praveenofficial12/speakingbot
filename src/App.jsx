@@ -253,7 +253,7 @@ function Admin({navigate,user}) {
   const [tab,setTab]=useState('overview'); const [metrics,setMetrics]=useState(null); const [error,setError]=useState('');
   const load=async()=>{try{setError('');setMetrics(await api('/admin/metrics'))}catch(e){setError(e.message)}};
   useEffect(()=>{load(); const id=setInterval(load,15000); return()=>clearInterval(id)},[]);
-  if(!user) return <main className="container page-pad"><Empty icon={<ShieldCheck/>} title="Admin sign-in required" text="Sign in with the configured admin email to monitor users." action={()=>navigate('login')} actionText="Sign in"/>;
+  if(!user) return <main className="container page-pad"><Empty icon={<ShieldCheck/>} title="Admin sign-in required" text="Sign in with the configured admin email to monitor users." action={()=>navigate('login')} actionText="Sign in"/></main>;
   if(user.role!=='admin') return <main className="container page-pad"><Empty icon={<ShieldCheck/>} title="Admin access required" text="Your account does not have administrator access." action={()=>navigate('home')} actionText="Go home"/></main>;
   if(error) return <main className="container page-pad"><Empty icon={<ShieldCheck/>} title="Admin access unavailable" text={error} action={load} actionText="Retry"/></main>;
   const active=metrics?.activeUsers||0;

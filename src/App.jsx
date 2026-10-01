@@ -107,7 +107,7 @@ function App() {
       {page === 'tests' && <Tests navigate={navigate} startTest={startTest} search={search} />}
       {page === 'dashboard' && <Dashboard navigate={navigate} lastResult={lastResult} />}
       {page === 'test' && attempt && <TestEngine attempt={attempt} setAttempt={setAttempt} activeTest={activeTest} questions={questions} submitTest={submitTest} navigate={navigate} />}
-      {page === 'result' && <Result result={lastResult} navigate={navigate} startTest={startTest} />}
+      {page === 'result' && <Result result={lastResult} questions={questions} navigate={navigate} startTest={startTest} />}
       {page === 'bookmarks' && <Bookmarks bookmarks={bookmarks} setBookmarks={setBookmarks} navigate={navigate} />}
       {page === 'admin' && <Admin navigate={navigate} user={user} />}
       {page === 'login' && <Auth navigate={navigate} setUser={setUser} />}
@@ -230,7 +230,7 @@ function TestEngine({attempt,setAttempt,activeTest,questions,submitTest,navigate
   </div>;
 }
 
-function Result({result,navigate,startTest}) {
+function Result({result,questions,navigate,startTest}) {
   const r=result||{score:4,max:5,percentage:80,correct:4,incorrect:1,skipped:0,time:312,test:TESTS[1]};
   return <main className="container page-pad"><div className="result-head"><button className="back-btn" onClick={()=>navigate('dashboard')}><ChevronLeft size={17}/> Dashboard</button><div className="kicker">Test completed</div><h1>Nice work, Praveen.</h1><p>Here is what your latest attempt tells you.</p></div>
     <div className="result-card"><div className="score-ring" style={{'--p':r.percentage}}><div><strong>{r.percentage}%</strong><span>Score</span></div></div><div className="result-main"><span className="pill green">Completed</span><h2>{r.test.title}</h2><p>Completed just now · {Math.floor(r.time/60)}m {r.time%60}s spent</p><div className="result-stats"><div><span className="correct-dot"><Check size={14}/></span><b>{r.correct}</b><small>Correct</small></div><div><span className="wrong-dot">×</span><b>{r.incorrect}</b><small>Incorrect</small></div><div><span className="skip-dot">—</span><b>{r.skipped}</b><small>Skipped</small></div></div></div></div>

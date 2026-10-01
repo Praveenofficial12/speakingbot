@@ -34,12 +34,14 @@ const QUESTIONS = [
 ];
 
 const CATEGORIES = [
-  ['Aptitude', 'Quantitative, DI and placement maths', '42 tests', '📐'],
-  ['Technical', 'Java, Python, SQL, DBMS and coding', '68 tests', '💻'],
-  ['Reasoning', 'Logic, puzzles and analytical thinking', '31 tests', '🧩'],
-  ['Verbal', 'Grammar, vocabulary and communication', '25 tests', '🗣️'],
-  ['Company Tests', 'Placement-style company assessments', '54 tests', '🏢'],
-  ['AI & ML', 'Machine learning and AI fundamentals', '18 tests', '🤖']
+  ['Aptitude', 'Quantitative, DI and placement maths', '42 tests', '📐', 'tests'],
+  ['Technical', 'Java, Python, SQL, DBMS and coding', '68 tests', '💻', 'tests'],
+  ['Reasoning', 'Logic, puzzles and analytical thinking', '31 tests', '🧩', 'tests'],
+  ['Verbal', 'Grammar, vocabulary and communication', '25 tests', '🗣️', 'tests'],
+  ['Company Tests', 'Placement-style company assessments', '54 tests', '🏢', 'tests'],
+  ['AI & ML', 'Machine learning and AI fundamentals', '18 tests', '🤖', 'tests'],
+  ['Speaking Practice', 'Timed speaking prompts with microphone and self-review', '4 practice modules', '🎙️', 'communication'],
+  ['Communication Practice', 'SWAR-style speaking, HR and situational practice', '4 practice modules', '💬', 'communication']
 ];
 
 function App() {
@@ -174,7 +176,7 @@ function Home({ navigate, startTest }) {
     </section>
     <section className="container section">
       <SectionHeading kicker="Explore" title="Find your practice path" action="View all tests" onAction={() => navigate('tests')}/>
-      <div className="category-grid">{CATEGORIES.map(([name, desc, count, icon]) => <button className="category-card" key={name} onClick={() => navigate('tests')}><span className="category-icon">{icon}</span><div><h3>{name}</h3><p>{desc}</p><small>{count} <ArrowRight size={14}/></small></div></button>)}</div>
+      <div className="category-grid">{CATEGORIES.map(([name, desc, count, icon, target]) => <button className="category-card" key={name} onClick={() => navigate(target)} aria-label={name}><span className="category-icon">{icon}</span><div><h3>{name}</h3><p>{desc}</p><small>{count} <ArrowRight size={14}/></small></div></button>)}</div>
     </section>
     <section className="section tinted"><div className="container">
       <SectionHeading kicker="Popular this week" title="Tests students are taking" action="See all" onAction={() => navigate('tests')}/>
@@ -203,7 +205,7 @@ function Tests({navigate,startTest,search}) {
   useEffect(()=>{ api('/tests').then(data=>{ if(data.tests?.length) setTests(data.tests.map(t=>({...t,id:t.testId,questions:t.questions||0,attempts:t.attempts||0}))); }).catch(()=>{}); },[]);
   const filtered=useMemo(()=>tests.filter(t => (filter==='All'||t.category===filter) && (!search||JSON.stringify(t).toLowerCase().includes(search.toLowerCase()))),[tests,filter,search]);
   return <main className="container page-pad"><div className="page-hero"><div><div className="kicker">Practice library</div><h1>Choose your next challenge.</h1><p>Timed practice sets designed for placement preparation and technical interviews.</p></div><button className="btn primary" onClick={()=>startTest(filtered[0]||TESTS[0])}><Play size={17}/> Quick start</button></div>
-    <div className="filter-row"><div className="filter-pills">{['All','Aptitude','Technical','Reasoning','Verbal'].map(x=><button className={filter===x?'selected':''} key={x} onClick={()=>setFilter(x)}>{x}</button>)}</div><span>{filtered.length} tests</span></div>
+    <div className="filter-row"><div className="filter-pills">{['All','Aptitude','Technical','Reasoning','Verbal','Company Tests','AI & ML'].map(x=><button className={filter===x?'selected':''} key={x} onClick={()=>setFilter(x)}>{x}</button>)}</div><span>{filtered.length} tests</span></div>
     <div className="test-grid large">{filtered.map(t=><TestCard key={t.id} test={t} onStart={startTest}/>)}</div>
     {!filtered.length && <Empty icon={<Search/>} title="No tests found" text="Try another search or category." action={()=>setFilter('All')}/>}
   </main>;
@@ -214,7 +216,7 @@ function Dashboard({navigate,lastResult,user}) {
   useEffect(()=>{ if(!user) return; api('/my/attempts').then(d=>setAttempts(d.attempts||[])).catch(()=>{}); },[user]);
   const avg=attempts.length?Math.round(attempts.reduce((s,a)=>s+(a.percentage||0),0)/attempts.length):0;
   const recent=attempts.slice(0,5);
-  return <main className="container page-pad"><div className="dashboard-head"><div><div className="kicker">Good morning, Praveen</div><h1>Your practice dashboard.</h1><p>Keep your streak alive and turn weak areas into strengths.</p></div><button className="btn primary" onClick={()=>navigate('tests')}><Plus size={18}/> New practice</button></div>
+  return <main className="container page-pad"><div className="dashboard-head"><div><div className="kicker">Good morning{user?.name ? ', ' + user.name.split(' ')[0] : ''}</div><h1>Your practice dashboard.</h1><p>Keep your streak alive and turn weak areas into strengths.</p></div><button className="btn primary" onClick={()=>navigate('tests')}><Plus size={18}/> New practice</button></div>
     <div className="stats-grid">{[['Tests attempted',attempts.length,'From your account',<BookOpen/>],['Average score',avg+'%','Across completed tests',<Target/>],['Accuracy',avg+'%','Server-recorded results',<BarChart3/>],['Practice streak','—','Keep practicing daily',<Flame/>]].map(([a,b,c,i])=><div className="metric" key={a}><span>{i}</span><small>{a}</small><strong>{b}</strong><em>{c}</em></div>)}</div>
     <div className="dashboard-grid"><section className="panel"><div className="panel-head"><div><small>Performance</small><h3>Score trend</h3></div><select><option>Last 30 days</option><option>Last 7 days</option></select></div><div className="big-chart">{[48,56,51,68,62,74,71,84,79,87].map((h,i)=><div key={i} className="chart-bar"><i style={{height:h+'%'}}/><small>{i+1}</small></div>)}</div></section><section className="panel"><div className="panel-head"><div><small>Topic mastery</small><h3>Where you stand</h3></div></div>{[['Java OOP',87],['SQL & DBMS',79],['Aptitude',74],['Logical Reasoning',68]].map(([x,v])=><div className="topic-row" key={x}><div><span>{x}</span><b>{v}%</b></div><div className="progress"><i style={{width:v+'%'}}/></div></div>)}</section></div>
     <div className="dashboard-grid"><section className="panel"><div className="panel-head"><div><small>Recent activity</small><h3>Latest attempts</h3></div><button className="text-btn" onClick={()=>navigate('tests')}>Practice more <ArrowRight size={15}/></button></div><div className="activity-list">{recent.length?recent.map(a=><div className="activity" key={a._id}><span className="activity-icon"><Check size={17}/></span><div><b>{a.testId}</b><small>{new Date(a.completedAt).toLocaleString()} · {a.maxScore} questions</small></div><strong>{a.percentage}%</strong></div>):<div className="empty"><span><BookOpen/></span><h3>No attempts yet</h3><p>Start a test to build your real performance history.</p></div>}</div></section><section className="panel recommendation"><span className="rec-icon"><Sparkles/></span><small>Recommended for you</small><h3>Strengthen SQL JOINs</h3><p>Your recent accuracy in JOIN questions is 61%. A focused 10-question set can help.</p><button className="btn primary full" onClick={()=>navigate('tests')}>Practice weak area <ArrowRight size={16}/></button></section></div>
@@ -345,7 +347,7 @@ function Auth({navigate,setUser}) {
 }
 
 function Profile({navigate,user}) {
-  return <main className="container page-pad"><div className="profile-card"><div className="profile-cover"/><div className="profile-content"><span className="profile-avatar">PK</span><div className="profile-title"><div><h1>{user?.name || 'Student'}</h1><p>AI & Data Science · Placement learner</p></div><button className="btn secondary"><Settings size={16}/> Edit profile</button></div><div className="profile-grid"><div><small>Email</small><b>{user?.email || 'Not available'}</b></div><div><small>Practice level</small><b>Intermediate</b></div><div><small>Tests completed</small><b>24</b></div><div><small>Current streak</small><b>7 days</b></div></div></div></div><div className="panel profile-preferences"><div className="panel-head"><div><small>Account</small><h3>Preferences</h3></div></div>{[['Notifications','Receive reminders and weekly progress summaries'],['Personalized recommendations','Use your performance to suggest practice topics'],['Public leaderboard','Show my display name on public rankings']].map(([x,y],i)=><div className="setting-row" key={x}><div><b>{x}</b><small>{y}</small></div><label className="switch"><input type="checkbox" defaultChecked={i<2}/><span/></label></div>)}</div></main>;
+  return <main className="container page-pad"><div className="profile-card"><div className="profile-cover"/><div className="profile-content"><span className="profile-avatar">{(user?.name || 'Student').slice(0,2).toUpperCase()}</span><div className="profile-title"><div><h1>{user?.name || 'Student'}</h1><p>AI & Data Science · Placement learner</p></div><button className="btn secondary"><Settings size={16}/> Edit profile</button></div><div className="profile-grid"><div><small>Email</small><b>{user?.email || 'Not available'}</b></div><div><small>Practice level</small><b>Intermediate</b></div><div><small>Tests completed</small><b>24</b></div><div><small>Current streak</small><b>7 days</b></div></div></div></div><div className="panel profile-preferences"><div className="panel-head"><div><small>Account</small><h3>Preferences</h3></div></div>{[['Notifications','Receive reminders and weekly progress summaries'],['Personalized recommendations','Use your performance to suggest practice topics'],['Public leaderboard','Show my display name on public rankings']].map(([x,y],i)=><div className="setting-row" key={x}><div><b>{x}</b><small>{y}</small></div><label className="switch"><input type="checkbox" defaultChecked={i<2}/><span/></label></div>)}</div></main>;
 }
 
 function Footer({navigate}) { return <footer><div className="container footer-grid"><div><button className="brand"><span className="brand-mark"><BrainCircuit size={20}/></span><span>Speaking<span>Bot</span></span></button><p>Practice with purpose. Learn from every attempt.</p></div><div><b>Practice</b><button onClick={()=>navigate('tests')}>All tests</button><button onClick={()=>navigate('dashboard')}>Dashboard</button><button onClick={()=>navigate('bookmarks')}>Bookmarks</button></div><div><b>Platform</b><button>About</button><button>Pricing</button><button>Help center</button></div><div><b>Built for</b><span>Students</span><span>Placement prep</span><span>Technical interviews</span></div></div><div className="footer-bottom container">© 2026 SpeakingBot · Built as an original practice platform</div></footer> }

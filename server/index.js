@@ -42,7 +42,7 @@ app.get('/api/tests',async(req,res)=>{
   const category=req.query.category; const q=String(req.query.q||'').trim();
   const filter={published:true}; if(category) filter.category=category;
   if(q) filter.$or=[{title:{$regex:q,$options:'i'}},{topic:{$regex:q,$options:'i'}},{category:{$regex:q,$options:'i'}}];
-  const tests=await Test.find(filter).sort({createdAt:-1}).lean(); res.json({tests});
+  const tests=await Test.find(filter).sort({createdAt:-1}).lean(); const ids=tests.map(t=>t.testId); const counts=ids.length?await Question.aggregate([{$match:{testId:{$in:ids},published:true}},{$group:{_id:'$testId',count:{$sum:1}}} ]):[]; const attempts=ids.length?await Attempt.aggregate([{$match:{testId:{$in:ids}}},{$group:{_id:'$testId',count:{$sum:1}}}]):[]; const qm=Object.fromEntries(counts.map(x=>[x._id,x.count])); const am=Object.fromEntries(attempts.map(x=>[x._id,x.count])); res.json({tests:tests.map(t=>({...t,questions:qm[t.testId]||0,attempts:am[t.testId]||0}))});
 });
 app.get('/api/tests/:testId',async(req,res)=>{
   const test=await Test.findOne({testId:req.params.testId,published:true}).lean();

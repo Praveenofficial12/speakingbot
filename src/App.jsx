@@ -109,6 +109,7 @@ function App() {
       {page === 'tests' && <Tests navigate={navigate} startTest={startTest} search={search} />}
       {page === 'dashboard' && <Dashboard navigate={navigate} lastResult={lastResult} user={user} />}
       {page === 'scheduled' && <ScheduledTests user={user} navigate={navigate} startScheduled={startScheduled} />}
+      {page === 'communication' && <CommunicationLab user={user} navigate={navigate} />}
       {page === 'test' && attempt && <TestEngine attempt={attempt} setAttempt={setAttempt} activeTest={activeTest} questions={questions} submitTest={submitTest} navigate={navigate} />}
       {page === 'result' && <Result result={lastResult} questions={questions} navigate={navigate} startTest={startTest} />}
       {page === 'bookmarks' && <Bookmarks bookmarks={bookmarks} setBookmarks={setBookmarks} navigate={navigate} />}
@@ -126,9 +127,9 @@ function Header({ dark, setDark, page, navigate, search, setSearch, mobileOpen, 
       <div className="header-inner">
         <button className="brand" onClick={() => navigate('home')}><span className="brand-mark"><BrainCircuit size={20}/></span><span>Speaking<span>Bot</span></span></button>
         <nav className={mobileOpen ? 'nav open' : 'nav'}>
-          {['home','tests','dashboard','bookmarks','scheduled'].map(item =>
+          {['home','tests','communication','dashboard','bookmarks','scheduled'].map(item =>
             <button key={item} className={page === item ? 'active' : ''} onClick={() => navigate(item)}>
-              {item === 'home' ? 'Home' : item === 'tests' ? 'Practice Tests' : item === 'dashboard' ? 'Dashboard' : item === 'scheduled' ? 'Assessments' : 'Bookmarks'}
+              {item === 'home' ? 'Home' : item === 'tests' ? 'Practice Tests' : item === 'dashboard' ? 'Dashboard' : item === 'communication' ? 'Communication Lab' : item === 'scheduled' ? 'Assessments' : 'Bookmarks'}
             </button>
           )}
           {user?.role==='admin' && <button onClick={() => navigate('admin')}>Admin</button>}
@@ -250,6 +251,36 @@ function Result({result,questions,navigate,startTest}) {
 function Bookmarks({bookmarks,setBookmarks,navigate}) {
   const items=QUESTIONS.filter(q=>bookmarks.includes(q.id));
   return <main className="container page-pad"><div className="page-hero"><div><div className="kicker">Saved for later</div><h1>Your bookmarks.</h1><p>Keep tricky questions close so you can revisit them when you practice.</p></div><button className="btn primary" onClick={()=>navigate('tests')}>Find more questions <ArrowRight size={17}/></button></div>{items.length?<div className="bookmark-list">{items.map(q=><div className="bookmark-card" key={q.id}><span className="category-icon small"><Bookmark size={18}/></span><div><span className="test-category">{q.topic}</span><h3>{q.text}</h3><p>{q.explanation}</p></div><button className="icon-btn" onClick={()=>setBookmarks(bookmarks.filter(id=>id!==q.id))}><X size={17}/></button></div>)}</div>:<Empty icon={<Bookmark/>} title="No bookmarks yet" text="Save questions while practicing to build your personal revision set." action={()=>navigate('tests')} actionText="Browse tests"/>}</main>;
+}
+
+function CommunicationLab({user,navigate}) {
+  const tasks=[
+    {title:'Self Introduction',type:'Speak for 60 seconds',prompt:'Introduce yourself as if you are meeting an HR interviewer for the first time. Mention your education, skills, project experience and career goal.',seconds:60},
+    {title:'Picture / Topic Talk',type:'Speak for 90 seconds',prompt:'Talk about a technology you use every day. Explain what it does, why it is useful, and one improvement you would make.',seconds:90},
+    {title:'Situational Response',type:'Speak for 60 seconds',prompt:'You are asked to explain a technical problem to a non-technical manager. Describe how you would communicate the problem and your solution clearly.',seconds:60},
+    {title:'HR Interview Answer',type:'Speak for 90 seconds',prompt:'Answer: Why should we hire you as a fresher? Give a confident, natural answer using your skills, projects and willingness to learn.',seconds:90}
+  ];
+  const [task,setTask]=useState(0); const [running,setRunning]=useState(false); const [seconds,setSeconds]=useState(tasks[0].seconds);
+  const [recording,setRecording]=useState(false); const [audio,setAudio]=useState(''); const [transcript,setTranscript]=useState(''); const [listening,setListening]=useState(false);
+  const recorder=React.useRef(null); const chunks=React.useRef([]);
+  const current=tasks[task];
+  useEffect(()=>{if(!running)return; if(seconds<=0){setRunning(false);stopRecording();return} const id=setInterval(()=>setSeconds(x=>x-1),1000);return()=>clearInterval(id)},[running,seconds]);
+  const selectTask=i=>{setTask(i);setRunning(false);setSeconds(tasks[i].seconds);setAudio('');setTranscript('')};
+  const startRecording=async()=>{try{const stream=await navigator.mediaDevices.getUserMedia({audio:true});chunks.current=[];const mr=new MediaRecorder(stream);recorder.current=mr;mr.ondataavailable=e=>{if(e.data.size)chunks.current.push(e.data)};mr.onstop=()=>{stream.getTracks().forEach(t=>t.stop());const blob=new Blob(chunks.current,{type:'audio/webm'});setAudio(URL.createObjectURL(blob))};mr.start();setRecording(true);setRunning(true);try{const SR=window.SpeechRecognition||window.webkitSpeechRecognition;if(SR){const sr=new SR();sr.continuous=true;sr.interimResults=true;sr.lang='en-IN';sr.onresult=e=>{let text='';for(let i=0;i<e.results.length;i++)text+=e.results[i][0].transcript+' ';setTranscript(text.trim())};sr.onend=()=>setListening(false);sr.start();window.sbRecognition=sr;setListening(true)}}catch{}}catch{alert('Microphone permission is required for speaking practice.')}};
+  const stopRecording=()=>{if(recorder.current&&recorder.current.state!=='inactive')recorder.current.stop();if(window.sbRecognition){try{window.sbRecognition.stop()}catch{}window.sbRecognition=null}setRecording(false);setListening(false);setRunning(false)};
+  const reset=()=>{stopRecording();setSeconds(current.seconds);setAudio('');setTranscript('')};
+  const mm=String(Math.floor(seconds/60)).padStart(2,'0'), ss=String(seconds%60).padStart(2,'0');
+  return <main className="container page-pad"><div className="page-hero"><div><div className="kicker">SWAR communication assessment</div><h1>Speak with confidence.</h1><p>Practice the communication skills commonly checked in placement and company assessments: clarity, confidence, structure and natural delivery.</p></div><span className="admin-badge"><ShieldCheck size={16}/> Browser microphone</span></div>
+    <div className="communication-layout"><aside className="panel communication-menu"><small>Assessment modules</small>{tasks.map((x,i)=><button className={i===task?'selected':''} key={x.title} onClick={()=>selectTask(i)}><span>{i+1}</span><div><b>{x.title}</b><small>{x.type}</small></div><ChevronRight size={15}/></button>)}</aside>
+    <section className="panel speaking-stage"><div className="stage-top"><span className="pill purple">{current.type}</span><span className="timer"><Clock3 size={16}/>{mm}:{ss}</span></div><div className="prompt-card"><small>Your speaking prompt</small><h2>{current.prompt}</h2><p>Take a few seconds to organize your answer. Speak naturally, avoid memorizing sentences, and keep your answer structured.</p></div>
+      <div className={'mic-orb '+(recording?'recording':'')}><div><span>{recording?'●':'🎙'}</span><small>{recording?(listening?'Listening & recording':'Recording'):'Ready to speak'}</small></div></div>
+      <div className="stage-actions">{!recording?<button className="btn primary" onClick={startRecording}><Play size={17}/> Start speaking</button>:<button className="btn danger" onClick={stopRecording}>Stop recording</button>}<button className="btn secondary" onClick={reset}>Reset</button></div>
+      {audio&&<div className="recorded"><div><Check size={17}/><b>Your response is recorded</b><small>Listen back and evaluate your delivery.</small></div><audio controls src={audio}/></div>}
+      <div className="self-check"><div><small>Communication self-check</small><h3>Review your answer</h3></div><div className="check-grid">{['Clear pronunciation','Good pace','Confident tone','Logical structure'].map(x=><label key={x}><input type="checkbox"/><span>{x}</span></label>)}</div></div>
+      <div className="transcript"><div><small>Speech transcript</small><h3>{transcript?'What the browser heard':'Transcript appears while you speak'}</h3></div><p>{transcript||'Chrome/Edge speech recognition can show a live transcript. Your audio stays in this browser unless you explicitly submit it through a future backend integration.'}</p></div>
+    </section></div>
+    <div className="communication-note"><Sparkles size={18}/><span><b>Practice mode:</b> This area is designed for repeated communication practice. For a company SWAR assessment, the admin can schedule a timed assessment and give the candidate the access password.</span></div>
+  </main>;
 }
 
 function Admin({navigate,user}) {

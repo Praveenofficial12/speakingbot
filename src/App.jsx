@@ -6,6 +6,16 @@ import {
   Settings, ShieldCheck, Sparkles, Sun, Target, Trophy, UserRound, X, Zap
 } from 'lucide-react';
 
+const API = import.meta.env.VITE_API_URL || '/api';
+const api = async (path, options = {}) => {
+  const token = localStorage.getItem('sb-token');
+  const headers = { 'Content-Type': 'application/json', ...(options.headers || {}) };
+  if (token) headers.Authorization = 'Bearer ' + token;
+  const res = await fetch(API + path, { ...options, headers });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.error || 'Request failed');
+  return data;
+};
 const TESTS = [
   { id: 'apt-1', title: 'Quantitative Aptitude — Placement Set 01', category: 'Aptitude', topic: 'Quantitative Aptitude', difficulty: 'Medium', questions: 20, duration: 20, attempts: 1240, premium: false, score: 92 },
   { id: 'sql-1', title: 'SQL & DBMS Interview Challenge', category: 'Technical', topic: 'SQL', difficulty: 'Medium', questions: 15, duration: 15, attempts: 980, premium: false, score: 88 },
@@ -40,7 +50,8 @@ function App() {
   const [activeTest, setActiveTest] = useState(null);
   const [attempt, setAttempt] = useState(null);
   const [lastResult, setLastResult] = useState(null);
-  const [bookmarks, setBookmarks] = useState(() => JSON.parse(localStorage.getItem('sb-bookmarks') || '[]'));
+  const [bookmarks, setBookmarks] = useState(() => { try { return JSON.parse(localStorage.getItem('sb-bookmarks') || '[]'); } catch { return []; } });
+  const [user, setUser] = useState(() => { try { return JSON.parse(localStorage.getItem('sb-user') || 'null'); } catch { return null; } });
 
   useEffect(() => {
     document.documentElement.classList.toggle('dark', dark);
@@ -73,27 +84,29 @@ function App() {
       test: activeTest || TESTS[0]
     };
     setLastResult(result);
+    if (localStorage.getItem('sb-token')) api('/attempts', { method: 'POST', body: JSON.stringify({ testId: result.test.id, score: result.correct, maxScore: result.max, durationSeconds: result.time }) }).catch(() => {});
     setAttempt(null);
     setPage('result');
   };
 
   return (
     <div className="app">
-      {page !== 'test' && <Header dark={dark} setDark={setDark} page={page} navigate={navigate} search={search} setSearch={setSearch} mobileOpen={mobileOpen} setMobileOpen={setMobileOpen} />}
+      {page !== 'test' && <Header dark={dark} setDark={setDark} page={page} navigate={navigate} user={user} setUser={setUser} search={search} setSearch={setSearch} mobileOpen={mobileOpen} setMobileOpen={setMobileOpen} />}
       {page === 'home' && <Home navigate={navigate} startTest={startTest} />}
       {page === 'tests' && <Tests navigate={navigate} startTest={startTest} search={search} />}
       {page === 'dashboard' && <Dashboard navigate={navigate} lastResult={lastResult} />}
       {page === 'test' && attempt && <TestEngine attempt={attempt} setAttempt={setAttempt} activeTest={activeTest} submitTest={submitTest} navigate={navigate} />}
       {page === 'result' && <Result result={lastResult} navigate={navigate} startTest={startTest} />}
       {page === 'bookmarks' && <Bookmarks bookmarks={bookmarks} setBookmarks={setBookmarks} navigate={navigate} />}
-      {page === 'admin' && <Admin navigate={navigate} />}
+      {page === 'admin' && <Admin navigate={navigate} user={user} />}
+      {page === 'login' && <Auth navigate={navigate} setUser={setUser} />}
       {page === 'profile' && <Profile navigate={navigate} />}
       {page === 'home' || page === 'tests' ? <Footer navigate={navigate} /> : null}
     </div>
   );
 }
 
-function Header({ dark, setDark, page, navigate, search, setSearch, mobileOpen, setMobileOpen }) {
+function Header({ dark, setDark, page, navigate, search, setSearch, mobileOpen, setMobileOpen, user, setUser }) {
   return (
     <header className="header">
       <div className="header-inner">
@@ -109,7 +122,7 @@ function Header({ dark, setDark, page, navigate, search, setSearch, mobileOpen, 
         <div className="header-actions">
           <div className="search-box"><Search size={17}/><input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search tests..." onKeyDown={e => e.key === 'Enter' && navigate('tests')} /></div>
           <button className="icon-btn" onClick={() => setDark(!dark)} title="Toggle theme">{dark ? <Sun size={18}/> : <Moon size={18}/>}</button>
-          <button className="profile-btn" onClick={() => navigate('profile')}><span className="avatar">PK</span><span className="hide-sm">Praveen</span></button>
+          <button className="profile-btn" onClick={() => user ? navigate('profile') : navigate('login')}><span className="avatar">{user?.name?.slice(0,2).toUpperCase() || 'IN'}</span><span className="hide-sm">{user?.name || 'Sign in'}</span></button>
           <button className="menu-btn" onClick={() => setMobileOpen(!mobileOpen)}><Menu size={21}/></button>
         </div>
       </div>
@@ -209,7 +222,7 @@ function TestEngine({attempt,setAttempt,activeTest,submitTest,navigate}) {
 function Result({result,navigate,startTest}) {
   const r=result||{score:4,max:5,percentage:80,correct:4,incorrect:1,skipped:0,time:312,test:TESTS[1]};
   return <main className="container page-pad"><div className="result-head"><button className="back-btn" onClick={()=>navigate('dashboard')}><ChevronLeft size={17}/> Dashboard</button><div className="kicker">Test completed</div><h1>Nice work, Praveen.</h1><p>Here is what your latest attempt tells you.</p></div>
-    <div className="result-card"><div className="score-ring"><div><strong>{r.percentage}%</strong><span>Score</span></div></div><div className="result-main"><span className="pill green">Completed</span><h2>{r.test.title}</h2><p>Completed just now · {Math.floor(r.time/60)}m {r.time%60}s spent</p><div className="result-stats"><div><span className="correct-dot"><Check size={14}/></span><b>{r.correct}</b><small>Correct</small></div><div><span className="wrong-dot">×</span><b>{r.incorrect}</b><small>Incorrect</small></div><div><span className="skip-dot">—</span><b>{r.skipped}</b><small>Skipped</small></div></div></div></div>
+    <div className="result-card"><div className="score-ring" style={{'--p':r.percentage}}><div><strong>{r.percentage}%</strong><span>Score</span></div></div><div className="result-main"><span className="pill green">Completed</span><h2>{r.test.title}</h2><p>Completed just now · {Math.floor(r.time/60)}m {r.time%60}s spent</p><div className="result-stats"><div><span className="correct-dot"><Check size={14}/></span><b>{r.correct}</b><small>Correct</small></div><div><span className="wrong-dot">×</span><b>{r.incorrect}</b><small>Incorrect</small></div><div><span className="skip-dot">—</span><b>{r.skipped}</b><small>Skipped</small></div></div></div></div>
     <div className="dashboard-grid"><section className="panel"><div className="panel-head"><div><small>Question review</small><h3>How you performed</h3></div></div>{QUESTIONS.map((q,i)=>{const correct=i<r.correct;return <div className="review-row" key={q.id}><span className={correct?'review-ok':'review-bad'}>{correct?<Check size={15}/>:'×'}</span><div><b>Question {i+1}</b><small>{q.topic} · {q.difficulty}</small></div><span>{correct?'Correct':'Review'}</span></div>})}</section><section className="panel recommendation"><span className="rec-icon"><Sparkles/></span><small>Next best step</small><h3>Keep the momentum.</h3><p>Review explanations for missed questions, then take another set from the same topic.</p><button className="btn primary full" onClick={()=>startTest(r.test)}>Retake test <ArrowRight size={16}/></button><button className="btn secondary full" onClick={()=>navigate('tests')}>Explore related tests</button></section></div>
   </main>;
 }
@@ -219,9 +232,27 @@ function Bookmarks({bookmarks,setBookmarks,navigate}) {
   return <main className="container page-pad"><div className="page-hero"><div><div className="kicker">Saved for later</div><h1>Your bookmarks.</h1><p>Keep tricky questions close so you can revisit them when you practice.</p></div><button className="btn primary" onClick={()=>navigate('tests')}>Find more questions <ArrowRight size={17}/></button></div>{items.length?<div className="bookmark-list">{items.map(q=><div className="bookmark-card" key={q.id}><span className="category-icon small"><Bookmark size={18}/></span><div><span className="test-category">{q.topic}</span><h3>{q.text}</h3><p>{q.explanation}</p></div><button className="icon-btn" onClick={()=>setBookmarks(bookmarks.filter(id=>id!==q.id))}><X size={17}/></button></div>)}</div>:<Empty icon={<Bookmark/>} title="No bookmarks yet" text="Save questions while practicing to build your personal revision set." action={()=>navigate('tests')} actionText="Browse tests"/>}</main>;
 }
 
-function Admin({navigate}) {
-  const [tab,setTab]=useState('overview');
-  return <main className="container page-pad"><div className="admin-head"><div><div className="kicker">Content studio</div><h1>Admin workspace.</h1><p>Manage tests, questions and student performance from one place.</p></div><span className="admin-badge"><ShieldCheck size={16}/> Admin mode</span></div><div className="admin-tabs">{['overview','tests','questions','users'].map(x=><button className={tab===x?'selected':''} key={x} onClick={()=>setTab(x)}>{x[0].toUpperCase()+x.slice(1)}</button>)}</div>{tab==='overview'?<><div className="stats-grid">{[['Total users','2,481','+12.4%',<UserRound/>],['Published tests','214','+18',<BookOpen/>],['Questions','6,842','+312',<FileQuestion/>],['Attempts','18,920','+9.7%',<BarChart3/>]].map(([a,b,c,i])=><div className="metric" key={a}><span>{i}</span><small>{a}</small><strong>{b}</strong><em>{c} this month</em></div>)}</div><div className="dashboard-grid"><section className="panel"><div className="panel-head"><div><small>Most popular</small><h3>Tests by attempts</h3></div><button className="text-btn">Export <ArrowRight size={15}/></button></div>{TESTS.map((t,i)=><div className="admin-row" key={t.id}><span className="rank">{i+1}</span><div><b>{t.title}</b><small>{t.category} · {t.difficulty}</small></div><strong>{t.attempts.toLocaleString()}</strong></div>)}</section><section className="panel"><div className="panel-head"><div><small>Quick actions</small><h3>Content management</h3></div></div><div className="quick-actions">{[['Create test',<Plus/>],['Add question',<FileQuestion/>],['Import question bank',<ArrowRight/>],['Manage users',<UserRound/>]].map(([x,i])=><button key={x} onClick={()=>setTab(x==='Manage users'?'users':x==='Add question'?'questions':'tests')}><span>{i}</span><b>{x}</b><ChevronRight size={16}/></button>)}</div></section></div></>:<section className="panel admin-table"><div className="panel-head"><div><small>{tab}</small><h3>{tab==='tests'?'Test library':tab==='questions'?'Question bank':'User directory'}</h3></div><button className="btn primary"><Plus size={16}/> Add new</button></div>{Array.from({length:6},(_,i)=><div className="admin-row" key={i}><span className="rank">{i+1}</span><div><b>{tab==='questions'?QUESTIONS[i%QUESTIONS.length].text:tab==='users'?['Praveen Kumar','Arun Raj','Divya S','Karthik M','Nisha P','Rahul V'][i]:TESTS[i%TESTS.length].title}</b><small>{tab==='users'?'Student · Active':tab==='questions'?'Multiple choice · Published': 'Published · '+(20+i)+' questions'}</small></div><button className="icon-btn"><Settings size={16}/></button></div>)}</section>}</main>;
+function Admin({navigate,user}) {
+  const [tab,setTab]=useState('overview'); const [metrics,setMetrics]=useState(null); const [error,setError]=useState('');
+  const load=async()=>{try{setError('');setMetrics(await api('/admin/metrics'))}catch(e){setError(e.message)}};
+  useEffect(()=>{load(); const id=setInterval(load,15000); return()=>clearInterval(id)},[]);
+  if(!user) return <main className="container page-pad"><Empty icon={<ShieldCheck/>} title="Admin sign-in required" text="Sign in with the configured admin email to monitor users." action={()=>navigate('login')} actionText="Sign in"/></main>;
+  if(error) return <main className="container page-pad"><Empty icon={<ShieldCheck/>} title="Admin access unavailable" text={error} action={load} actionText="Retry"/></main>;
+  const active=metrics?.activeUsers||0;
+  return <main className="container page-pad"><div className="admin-head"><div><div className="kicker">Live operations</div><h1>Admin monitoring.</h1><p>Live user activity, attempts and platform health.</p></div><span className="admin-badge"><ShieldCheck size={16}/> Protected admin</span></div>
+    <div className="stats-grid">{[['Total users',metrics?.totalUsers||0,'Registered',<UserRound/>],['Active now',active,'Seen in last 5 min',<Zap/>],['Attempts',metrics?.totalAttempts||0,'All time',<BarChart3/>],['API status','LIVE','Auto-refresh 15s',<Check/>]].map(([a,b,c,i])=><div className="metric" key={a}><span>{i}</span><small>{a}</small><strong>{b}</strong><em>{c}</em></div>)}</div>
+    <div className="admin-tabs">{['overview','users','attempts'].map(x=><button className={tab===x?'selected':''} key={x} onClick={()=>setTab(x)}>{x[0].toUpperCase()+x.slice(1)}</button>)}</div>
+    <section className="panel admin-table"><div className="panel-head"><div><small>Live data</small><h3>{tab==='users'?'User directory':tab==='attempts'?'Recent attempts':'Platform activity'}</h3></div><button className="text-btn" onClick={load}>Refresh <ArrowRight size={15}/></button></div>
+    {tab==='overview' && <><div className="success-banner"><Check size={18}/><span><b>{active}</b> users have been active within the last 5 minutes. Monitoring refreshes automatically.</span></div><div className="activity-list">{(metrics?.recentAttempts||[]).slice(0,10).map((a,i)=><div className="activity" key={a._id||i}><span className="activity-icon"><Check size={17}/></span><div><b>{a.userId?.name||'Student'}</b><small>{a.testId} · {a.percentage}%</small></div><strong>{a.score}/{a.maxScore}</strong></div>)}</div></>}
+    {tab==='users' && (metrics?.students||[]).map((u,i)=><div className="admin-row" key={u._id}><span className="rank">{i+1}</span><div><b>{u.name}</b><small>{u.email} · {u.role}</small></div><strong>{u.lastSeenAt?new Date(u.lastSeenAt).toLocaleString():'Never'}</strong></div>)}
+    {tab==='attempts' && (metrics?.recentAttempts||[]).map((a,i)=><div className="admin-row" key={a._id}><span className="rank">{i+1}</span><div><b>{a.userId?.name||'Student'} · {a.testId}</b><small>{new Date(a.completedAt).toLocaleString()}</small></div><strong>{a.percentage}%</strong></div>)}
+    </section></main>;
+}
+
+function Auth({navigate,setUser}) {
+  const [mode,setMode]=useState('login'); const [name,setName]=useState(''); const [email,setEmail]=useState(''); const [password,setPassword]=useState(''); const [error,setError]=useState(''); const [busy,setBusy]=useState(false);
+  const submit=async e=>{e.preventDefault();setBusy(true);setError('');try{const data=await api('/auth/'+mode,{method:'POST',body:JSON.stringify({name,email,password})});localStorage.setItem('sb-token',data.token);localStorage.setItem('sb-user',JSON.stringify(data.user));setUser(data.user);navigate(data.user.role==='admin'?'admin':'dashboard')}catch(err){setError(err.message)}finally{setBusy(false)}};
+  return <main className="container page-pad"><div className="auth-card panel"><div className="kicker">SpeakingBot account</div><h1>{mode==='login'?'Welcome back':'Create your account'}</h1><p>{mode==='login'?'Sign in to save attempts and access your dashboard.':'Create an account to track your practice.'}</p><form onSubmit={submit}>{mode==='register'&&<input required placeholder="Full name" value={name} onChange={e=>setName(e.target.value)}/>}<input required type="email" placeholder="Email" value={email} onChange={e=>setEmail(e.target.value)}/><input required minLength={8} type="password" placeholder="Password (8+ characters)" value={password} onChange={e=>setPassword(e.target.value)}/>{error&&<div className="error-text">{error}</div>}<button className="btn primary full" disabled={busy}>{busy?'Please wait…':mode==='login'?'Sign in':'Create account'}</button></form><button className="text-btn" onClick={()=>{setMode(mode==='login'?'register':'login');setError('')}}>{mode==='login'?'Need an account? Register':'Already registered? Sign in'}</button></div></main>;
 }
 
 function Profile({navigate}) {

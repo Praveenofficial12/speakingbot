@@ -2,7 +2,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import {
   ArrowRight, BarChart3, Bell, Bookmark, BookOpen, BrainCircuit, Check,
   ChevronLeft, ChevronRight, CircleHelp, Clock3, Code2, FileQuestion,
-  Flame, Grid2X2, Home, LayoutDashboard, Menu, Moon, Play, Plus, Search,
+  Flame, Grid2X2, LayoutDashboard, Menu, Moon, Play, Plus, Search,
   Settings, ShieldCheck, Sparkles, Sun, Target, Trophy, UserRound, X, Zap
 } from 'lucide-react';
 

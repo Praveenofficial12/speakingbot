@@ -1,41 +1,35 @@
 # SpeakingBot — Practice & Assessment Platform
 
-SpeakingBot is a full-stack practice and assessment portal built with React/Vite and Node/Express.
+SpeakingBot is a full-stack practice and assessment portal built with React/Vite, Node/Express and Supabase PostgreSQL.
 
-## Features
-- Timed aptitude, technical, reasoning, verbal and company-style tests
+## Production features
+- Aptitude, technical, reasoning, verbal, company and AI/ML practice tests
 - Speaking Practice and Communication/SWAR Practice Lab
 - Browser microphone recording and speech-transcript practice
-- Student registration and login
-- Secure JWT authentication with bcrypt password hashing
-- Persistent PostgreSQL storage
-- Server-side test scoring
-- Attempt history and dashboard data
+- Secure JWT sessions with bcrypt password hashing
+- Persistent Supabase PostgreSQL database
+- Server-side scoring and attempt history
 - Scheduled company assessments with candidate email + access password
-- Protected admin control center
-- Active-user monitoring
-- Admin test/question management
-- Security headers, compression and rate limiting
+- Protected admin control center and active-user monitoring
+- Admin test/question/schedule management
 - Responsive desktop/mobile interface
-- Render deployment with managed PostgreSQL
+- Helmet security headers, compression and rate limiting
+
+## Stack
+- Frontend: React 18 + Vite
+- Backend: Node.js + Express
+- Database: Supabase PostgreSQL
+- Authentication: application JWT + bcrypt
+- Deployment: Render
+
+## Production database
+The backend connects to Supabase through its Data API using a server-only application secret header. Database tables are protected with RLS and the backend is the only component that receives the application secret. Supabase's publishable key is not a database password and may be used with appropriate RLS controls.
 
 ## Local setup
 1. Run `npm install`.
-2. Create `server/.env` from `server/.env.example`.
-3. Set `DATABASE_URL` to a PostgreSQL database.
-4. Set a strong `JWT_SECRET`.
-5. Set admin username/email/password.
-6. Run `npm run dev` for frontend development.
-7. Run `npm start` for the API and production frontend.
-
-## Production
-Render provisions PostgreSQL and injects its private connection string through `DATABASE_URL`. The Node API automatically creates the required tables and indexes on startup and seeds a small demo question set when needed.
+2. Copy `server/.env.example` to `server/.env`.
+3. Fill in the Supabase and authentication environment variables.
+4. Run `npm run dev` for frontend development.
+5. Run `npm start` for the production API/frontend server.
 
 Never commit real secrets.
-
-## Architecture
-- Frontend: React 18 + Vite
-- Backend: Node.js + Express
-- Authentication: JWT + bcrypt
-- Database: PostgreSQL
-- Deployment: Render

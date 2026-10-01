@@ -320,9 +320,28 @@ function ScheduledTests({user,navigate,startScheduled}) {
 
 
 function Auth({navigate,setUser}) {
-  const [mode,setMode]=useState('login'); const [name,setName]=useState(''); const [email,setEmail]=useState(''); const [password,setPassword]=useState(''); const [error,setError]=useState(''); const [busy,setBusy]=useState(false);
-  const submit=async e=>{e.preventDefault();setBusy(true);setError('');try{const data=await api('/auth/'+mode,{method:'POST',body:JSON.stringify({name,email,password})});localStorage.setItem('sb-token',data.token);localStorage.setItem('sb-user',JSON.stringify(data.user));setUser(data.user);navigate(data.user.role==='admin'?'admin':'dashboard')}catch(err){setError(err.message)}finally{setBusy(false)}};
-  return <main className="container page-pad"><div className="auth-card panel"><div className="kicker">SpeakingBot account</div><h1>{mode==='login'?'Welcome back':'Create your account'}</h1><p>{mode==='login'?'Sign in to save attempts and access your dashboard.':'Create an account to track your practice.'}</p><form onSubmit={submit}>{mode==='register'&&<input required placeholder="Full name" value={name} onChange={e=>setName(e.target.value)}/>}<input required type="email" placeholder="Email" value={email} onChange={e=>setEmail(e.target.value)}/><input required minLength={8} type="password" placeholder="Password (8+ characters)" value={password} onChange={e=>setPassword(e.target.value)}/>{error&&<div className="error-text">{error}</div>}<button className="btn primary full" disabled={busy}>{busy?'Please wait…':mode==='login'?'Sign in':'Create account'}</button></form><button className="text-btn" onClick={()=>{setMode(mode==='login'?'register':'login');setError('')}}>{mode==='login'?'Need an account? Register':'Already registered? Sign in'}</button></div></main>;
+  const [mode,setMode]=useState('login'); const [name,setName]=useState(''); const [identifier,setIdentifier]=useState(''); const [password,setPassword]=useState(''); const [error,setError]=useState(''); const [busy,setBusy]=useState(false);
+  const submit=async e=>{e.preventDefault();setBusy(true);setError('');
+    try{
+      const body=mode==='register'?{name,email:identifier,password}:{identifier,password};
+      const data=await api('/auth/'+mode,{method:'POST',body:JSON.stringify(body)});
+      localStorage.setItem('sb-token',data.token);localStorage.setItem('sb-user',JSON.stringify(data.user));setUser(data.user);
+      navigate(data.user.role==='admin'?'admin':'dashboard');
+    }catch(err){setError(err.message)}finally{setBusy(false)}
+  };
+  return <main className="container page-pad"><div className="auth-card panel">
+    <div className="kicker">SpeakingBot account</div>
+    <h1>{mode==='login'?'Welcome back':'Create your account'}</h1>
+    <p>{mode==='login'?'Sign in with your email or company admin username.':'Create an account to track your practice.'}</p>
+    <form onSubmit={submit}>
+      {mode==='register'&&<input required autoComplete="name" placeholder="Full name" value={name} onChange={e=>setName(e.target.value)}/>}
+      <input required autoComplete={mode==='login'?'username':'email'} type={mode==='login'?'text':'email'} placeholder={mode==='login'?'Email or admin username':'Email'} value={identifier} onChange={e=>setIdentifier(e.target.value)}/>
+      <input required minLength={mode==='register'?8:1} autoComplete={mode==='login'?'current-password':'new-password'} type="password" placeholder={mode==='register'?'Password (8+ characters)':'Password'} value={password} onChange={e=>setPassword(e.target.value)}/>
+      {error&&<div className="error-text">{error}</div>}
+      <button className="btn primary full" disabled={busy}>{busy?'Please wait…':mode==='login'?'Sign in':'Create account'}</button>
+    </form>
+    <button className="text-btn" onClick={()=>{setMode(mode==='login'?'register':'login');setIdentifier('');setPassword('');setError('')}}>{mode==='login'?'Need an account? Register':'Already registered? Sign in'}</button>
+  </div></main>;
 }
 
 function Profile({navigate,user}) {

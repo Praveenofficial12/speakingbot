@@ -54,7 +54,8 @@ function App() {
   const [lastResult, setLastResult] = useState(null);
   const [bookmarks, setBookmarks] = useState(() => { try { return JSON.parse(localStorage.getItem('sb-bookmarks') || '[]'); } catch { return []; } });
   const [user, setUser] = useState(() => { try { return JSON.parse(localStorage.getItem('sb-user') || 'null'); } catch { return null; } });
-  const [questions, setQuestions] = useState(QUESTIONS);\n  const [scheduledNotice, setScheduledNotice] = useState(null);
+  const [questions, setQuestions] = useState(QUESTIONS);
+  const [scheduledNotice, setScheduledNotice] = useState(null);
 
   useEffect(() => {
     document.documentElement.classList.toggle('dark', dark);
@@ -291,7 +292,8 @@ function Admin({navigate,user}) {
   const submitSchedule=async e=>{e.preventDefault();setBusy(true);setCreated(null);try{const d=await api('/admin/schedules',{method:'POST',body:JSON.stringify(form)});setCreated(d);setForm({...form,email:'',password:'',audience:'global',testId:'swar-1'});await load()}catch(e){setError(e.message)}finally{setBusy(false)}};
   const remove=async id=>{if(!confirm('Remove this assessment access?'))return;try{await api('/admin/schedules/'+id,{method:'DELETE'});load()}catch(e){setError(e.message)}};
   const showAttendance=async id=>{try{setSelectedSchedule(id);setAttendance(await api('/admin/schedules/'+id+'/non-attendees'))}catch(e){setError(e.message)}};
-  const uploadRoster=async e=>{const file=e.target.files?.[0];if(!file||!selectedSchedule)return;setUploading(true);try{const lines=(await file.text()).split(/\r?\n/).filter(Boolean);const rows=lines.map((line,i)=>{const cells=line.split(',').map(x=>x.trim().replace(/^"|"$/g,''));if(i===0&&/email/i.test(cells[1]||cells[0]))return null;return {name:cells[0],email:cells[1]||cells[0]}}).filter(Boolean);await api('/admin/schedules/'+selectedSchedule+'/roster',{method:'POST',body:JSON.stringify({students:rows})});await showAttendance(selectedSchedule);alert(rows.length+' students imported.')}catch(e){setError(e.message)}finally{setUploading(false);e.target.value=''}};
+  const uploadRoster=async e=>{const file=e.target.files?.[0];if(!file||!selectedSchedule)return;setUploading(true);try{const lines=(await file.text()).split(/\r?
+/).filter(Boolean);const rows=lines.map((line,i)=>{const cells=line.split(',').map(x=>x.trim().replace(/^"|"$/g,''));if(i===0&&/email/i.test(cells[1]||cells[0]))return null;return {name:cells[0],email:cells[1]||cells[0]}}).filter(Boolean);await api('/admin/schedules/'+selectedSchedule+'/roster',{method:'POST',body:JSON.stringify({students:rows})});await showAttendance(selectedSchedule);alert(rows.length+' students imported.')}catch(e){setError(e.message)}finally{setUploading(false);e.target.value=''}};
   const active=metrics?.activeUsers||0;
   return <main className="container page-pad"><div className="admin-head"><div><div className="kicker">Company assessment operations</div><h1>Admin control center.</h1><p>Monitor students, schedule assessments, review results and track attendance.</p></div><span className="admin-badge"><ShieldCheck size={16}/> Protected admin</span></div>
     <div className="stats-grid">{[['Total users',metrics?.totalUsers||0,'Registered',<UserRound/>],['Active now',active,'Seen in last 5 min',<Zap/>],['Attempts',metrics?.totalAttempts||0,'All time',<BarChart3/>],['Scheduled',metrics?.scheduledTests||schedules.length,'Active assignments',<Calendar/>]].map(([a,b,c,i])=><div className="metric" key={a}><span>{i}</span><small>{a}</small><strong>{b}</strong><em>{c}</em></div>)}</div>

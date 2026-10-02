@@ -91,7 +91,7 @@ app.post('/api/auth/login',async(req,res)=>{
       value=ADMIN_EMAIL;
     }
     const normalized=value.toLowerCase();
-    let {data:user,error}=await db.from('profiles').select('id,name,email,role,password_hash').eq('email',normalized).maybeSingle();
+    let {data:user,error}=await db.from('profiles').select('id,name,email,role,password_hash,login_count,last_login_at').eq('email',normalized).maybeSingle();
     if(error)throw error;
     if(!user&&normalized===ADMIN_EMAIL&&String(password||'')===ADMIN_PASSWORD){
       const created={id:randomUUID(),name:'VSBEC Admin',email:ADMIN_EMAIL,role:'admin',password_hash:await bcrypt.hash(ADMIN_PASSWORD,12),last_seen_at:new Date().toISOString()};
@@ -142,12 +142,12 @@ app.get('/api/tests/:testId',async(req,res)=>{
 
 app.post('/api/attempts/submit',auth,async(req,res)=>{
   try{
-    const {testId,answers,durationSeconds}=req.body||{};
+    const {testId,answers,durationSeconds,scheduledAccessId}=req.body||{};
     const {data:qs,error}=await db.from('questions').select('id,answer').eq('test_id',testId).eq('published',true);
     if(error)throw error;if(!qs?.length)return res.status(404).json({error:'Test questions not found'});
     let correct=0;for(const q of qs)if(Number(answers?.[q.id])===q.answer)correct++;
     const maxScore=qs.length,answered=Object.keys(answers||{}).length;
-    const {data:attempt,error:ae}=await db.from('attempts').insert({user_id:req.user.id,test_id:testId,score:correct,max_score:maxScore,percentage:Math.round(correct/maxScore*100),duration_seconds:Math.max(0,Number(durationSeconds||0))}).select('*').single();
+    const {data:attempt,error:ae}=await db.from('attempts').insert({user_id:req.user.id,test_id:testId,score:correct,max_score:maxScore,percentage:Math.round(correct/maxScore*100),duration_seconds:Math.max(0,Number(durationSeconds||0)),scheduled_access_id:scheduledAccessId?Number(scheduledAccessId):null}).select('*').single();
     if(ae)throw ae;res.status(201).json({attempt:mapAttempt(attempt),correct,answered,skipped:Math.max(0,maxScore-answered),questions:maxScore});
   }catch(e){err(res,e,400);}
 });
@@ -170,6 +170,38 @@ app.post('/api/scheduled-tests/:id/verify',auth,async(req,res)=>{
   }catch(e){err(res,e,400);}
 });
 
+app.get('/api/admin/schedules/:id/non-attendees',auth,adminOnly,async(req,res)=>{
+  try{
+    const {data:s,error:se}=await db.from('assessment_access').select('*').eq('id',req.params.id).maybeSingle();
+    if(se)throw se;if(!s)return res.status(404).json({error:'Assessment not found'});
+    const {data:roster,error:re}=await db.from('assessment_roster').select('name,email').eq('assessment_access_id',s.id).order('name');
+    if(re)throw re;
+    let assigned=roster||[];
+    if(!assigned.length&&s.audience==='global'){
+      const {data:users,error:ue}=await db.from('profiles').select('name,email,login_count').order('name');
+      if(ue)throw ue;assigned=users||[];
+    } else if(!assigned.length&&s.email){
+      const {data:u}=await db.from('profiles').select('name,email,login_count').eq('email',s.email).maybeSingle();
+      assigned=u?[u]:[];
+    }
+    const {data:attempts,error:ae}=await db.from('attempts').select('user_id,completed_at,percentage,score,max_score').eq('test_id',s.test_id).gte('completed_at',s.start_at).lte('completed_at',s.end_at);
+    if(ae)throw ae;
+    const attended=new Set((attempts||[]).map(a=>a.user_id));
+    const {data:users,error:ue}=await db.from('profiles').select('id,name,email,login_count,last_login_at');
+    if(ue)throw ue;
+    const byEmail=new Map((users||[]).map(u=>[u.email.toLowerCase(),u]));
+    const notAttended=assigned.filter(x=>!attended.has(byEmail.get(String(x.email).toLowerCase())?.id)).map(x=>({...x,user:byEmail.get(String(x.email).toLowerCase())||null}));
+    res.json({assessment:mapSchedule(s),assignedCount:assigned.length,attendedCount:assigned.length-notAttended.length,notAttended});
+  }catch(e){err(res,e,500);}
+});
+app.post('/api/admin/schedules/:id/roster',auth,adminOnly,async(req,res)=>{
+  try{
+    const {data:s,error:se}=await db.from('assessment_access').select('id').eq('id',req.params.id).maybeSingle();if(se)throw se;if(!s)return res.status(404).json({error:'Assessment not found'});
+    const students=Array.isArray(req.body?.students)?req.body.students:[];if(!students.length)return res.status(400).json({error:'No students found in the uploaded list'});
+    const rows=students.map(x=>({assessment_access_id:s.id,name:String(x.name||x.email||'Student').trim(),email:String(x.email||'').toLowerCase().trim(),created_by:req.user.id})).filter(x=>x.email&&x.email.includes('@'));
+    const {error}=await db.from('assessment_roster').upsert(rows,{onConflict:'assessment_access_id,email'});if(error)throw error;res.json({ok:true,count:rows.length});
+  }catch(e){err(res,e,400);}
+});
 app.get('/api/admin/metrics',auth,adminOnly,async(req,res)=>{
   try{
     const [{count:totalUsers},{count:totalAttempts},{count:scheduledTests},{data:students},{data:recentAttempts}]=await Promise.all([

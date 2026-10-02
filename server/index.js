@@ -103,8 +103,9 @@ app.post('/api/auth/login',async(req,res)=>{
       const r=await db.from('profiles').update({role:'admin'}).eq('id',user.id).select('id,name,email,role').single();
       if(r.error)throw r.error;user={...user,...r.data};
     }
-    await db.from('profiles').update({last_seen_at:new Date().toISOString()}).eq('id',user.id);
-    res.json({token:tokenFor(user),user:safe(user)});
+    const loginNow=new Date().toISOString();
+    await db.from('profiles').update({last_seen_at:loginNow,last_login_at:loginNow,login_count:(user.login_count||0)+1}).eq('id',user.id);
+    res.json({token:tokenFor(user),user:safe({...user,login_count:(user.login_count||0)+1,last_login_at:loginNow})});
   }catch(e){err(res,e,401);}
 });
 
@@ -143,6 +144,14 @@ app.get('/api/tests/:testId',async(req,res)=>{
 app.post('/api/attempts/submit',auth,async(req,res)=>{
   try{
     const {testId,answers,durationSeconds,scheduledAccessId}=req.body||{};
+    if(scheduledAccessId){
+      const {data:access,error:accessError}=await db.from('assessment_access').select('*').eq('id',scheduledAccessId).eq('active',true).maybeSingle();
+      if(accessError)throw accessError;
+      if(!access||access.test_id!==testId||(access.audience!=='global'&&access.email!==req.user.email))return res.status(403).json({error:'Invalid scheduled assessment access'});
+      const now=Date.now(),start=new Date(access.start_at).getTime(),end=new Date(access.end_at).getTime();
+      if(now<start)return res.status(403).json({error:'Assessment has not started yet'});
+      if(now>end)return res.status(403).json({error:'Assessment time has ended. Your answers were not accepted.'});
+    }
     const {data:qs,error}=await db.from('questions').select('id,answer').eq('test_id',testId).eq('published',true);
     if(error)throw error;if(!qs?.length)return res.status(404).json({error:'Test questions not found'});
     let correct=0;for(const q of qs)if(Number(answers?.[q.id])===q.answer)correct++;

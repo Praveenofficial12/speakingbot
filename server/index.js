@@ -150,14 +150,14 @@ app.post('/api/attempts/submit',auth,async(req,res)=>{
 app.get('/api/my/attempts',auth,async(req,res)=>{const {data,error}=await db.from('attempts').select('*').eq('user_id',req.user.id).order('completed_at',{ascending:false}).limit(100);if(error)return err(res,error,500);res.json({attempts:data||[]});});
 
 app.get('/api/my/scheduled-tests',auth,async(req,res)=>{
-  const {data,error}=await db.from('assessment_access').select('*').eq('email',req.user.email).eq('active',true).gte('end_at',new Date().toISOString()).order('start_at');
+  const {data,error}=await db.from('assessment_access').select('*').eq('active',true).gte('end_at',new Date().toISOString()).or(`email.eq.${req.user.email},audience.eq.global`).order('start_at');
   if(error)return err(res,error,500);
   const rows=await Promise.all((data||[]).map(async a=>{const {data:test}=await db.from('tests').select('*').eq('test_id',a.test_id).maybeSingle();return {...a,_id:a.id,test,accessPasswordRequired:true};}));
   res.json({tests:rows});
 });
 app.post('/api/scheduled-tests/:id/verify',auth,async(req,res)=>{
   try{
-    const {data:a,error}=await db.from('assessment_access').select('*').eq('id',req.params.id).eq('email',req.user.email).eq('active',true).maybeSingle();
+    const {data:a,error}=await db.from('assessment_access').select('*').eq('id',req.params.id).eq('active',true).or(`email.eq.${req.user.email},audience.eq.global`).maybeSingle();
     if(error)throw error;if(!a)return res.status(404).json({error:'Assessment access not found'});
     const now=Date.now();if(now<new Date(a.start_at).getTime())return res.status(403).json({error:'Assessment has not started yet',startAt:a.start_at});if(now>new Date(a.end_at).getTime())return res.status(403).json({error:'Assessment access has expired',endAt:a.end_at});
     if(!(await bcrypt.compare(String(req.body?.password||''),a.access_password_hash)))return res.status(401).json({error:'Incorrect assessment access password'});
@@ -187,7 +187,7 @@ app.patch('/api/admin/questions/:id',auth,adminOnly,async(req,res)=>{const allow
 app.delete('/api/admin/questions/:id',auth,adminOnly,async(req,res)=>{const {error}=await db.from('questions').delete().eq('id',req.params.id);if(error)return err(res,error,400);res.json({ok:true});});
 
 app.get('/api/admin/schedules',auth,adminOnly,async(req,res)=>{const {data,error}=await db.from('assessment_access').select('*').order('start_at');if(error)return err(res,error,500);const rows=await Promise.all((data||[]).map(async a=>{const {data:test}=await db.from('tests').select('test_id,title,category,topic,difficulty,duration,premium').eq('test_id',a.test_id).maybeSingle();return {...a,_id:a.id,test};}));res.json({schedules:rows});});
-app.post('/api/admin/schedules',auth,adminOnly,async(req,res)=>{try{const {email,testId,startAt,endAt,password,label}=req.body||{};if(!email||!testId||!startAt||!endAt||!password||String(password).length<6)return res.status(400).json({error:'Email, test, start/end time and a 6+ character access password are required'});const hash=await bcrypt.hash(String(password),12);const {data,error}=await db.from('assessment_access').insert({email:String(email).toLowerCase().trim(),test_id:testId,start_at:startAt,end_at:endAt,access_password_hash:hash,label:label||'Company Assessment',created_by:req.user.id}).select('*').single();if(error)throw error;res.status(201).json({schedule:{...data,_id:data.id},accessPassword:String(password)});}catch(e){err(res,e,400);}});
+app.post('/api/admin/schedules',auth,adminOnly,async(req,res)=>{try{const {email,testId,startAt,endAt,password,label,audience}=req.body||{};const global=audience==='global'||!email;if(!testId||!startAt||!endAt||!password||String(password).length<6)return res.status(400).json({error:'Assessment, start/end time and a 6+ character access password are required'});const hash=await bcrypt.hash(String(password),12);const {data:errorCheck}=await db.from('tests').select('test_id').eq('test_id',testId).maybeSingle();if(!errorCheck)return res.status(404).json({error:'Selected assessment was not found'});const {data,error}=await db.from('assessment_access').insert({email:global?null:String(email).toLowerCase().trim(),audience:global?'global':'individual',test_id:testId,start_at:startAt,end_at:endAt,access_password_hash:hash,label:label||'Company Assessment',created_by:req.user.id}).select('*').single();if(error)throw error;res.status(201).json({schedule:{...data,_id:data.id},accessPassword:String(password)});}catch(e){err(res,e,400);}});
 app.delete('/api/admin/schedules/:id',auth,adminOnly,async(req,res)=>{const {error}=await db.from('assessment_access').delete().eq('id',req.params.id);if(error)return err(res,error,400);res.json({ok:true});});
 
 const dist=path.resolve(__dirname,'../dist');

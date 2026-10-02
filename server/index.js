@@ -36,7 +36,7 @@ app.use(rateLimit({windowMs:60000,max:180,standardHeaders:true,legacyHeaders:fal
 const safe=u=>u?({id:u.id,name:u.name,email:u.email,role:u.role}):null;
 const mapTest=t=>t?({...t,id:t.test_id,testId:t.test_id,createdAt:t.created_at,updatedAt:t.updated_at}):t;
 const mapQuestion=q=>q?({...q,_id:q.id,testId:q.test_id}):q;
-const mapAttempt=a=>a?({...a,_id:a.id,userId:a.user_id,testId:a.test_id,maxScore:a.max_score,durationSeconds:a.duration_seconds,completedAt:a.completed_at}):a;
+const mapAttempt=a=>a?({...a,_id:a.id,userId:a.user_id,testId:a.test_id,maxScore:a.max_score,durationSeconds:a.duration_seconds,scheduledAccessId:a.scheduled_access_id,completedAt:a.completed_at}):a;
 const mapSchedule=a=>a?({...a,_id:a.id,email:a.email,audience:a.audience||'individual',testId:a.test_id,startAt:a.start_at,endAt:a.end_at,accessPasswordRequired:true,createdAt:a.created_at}):a;
 const err=(res,e,status=400)=>res.status(status).json({error:e?.message||String(e)});
 
@@ -217,7 +217,7 @@ app.get('/api/admin/metrics',auth,adminOnly,async(req,res)=>{
       db.from('profiles').select('id',{count:'exact',head:true}),db.from('attempts').select('id',{count:'exact',head:true}),db.from('assessment_access').select('id',{count:'exact',head:true}).eq('active',true).gte('end_at',new Date().toISOString()),db.from('profiles').select('id,name,email,role,last_seen_at,created_at').order('last_seen_at',{ascending:false}).limit(5000),db.from('attempts').select('*').order('completed_at',{ascending:false}).limit(20)
     ]);
     const active=(students||[]).filter(u=>new Date(u.last_seen_at).getTime()>=Date.now()-300000).length;
-    res.json({totalUsers:totalUsers||0,activeUsers:active,totalAttempts:totalAttempts||0,recentAttempts:(recentAttempts||[]).map(mapAttempt),students:(students||[]).map(u=>({...u,_id:u.id,lastSeenAt:u.last_seen_at,createdAt:u.created_at})),scheduledTests:scheduledTests||0,generatedAt:new Date().toISOString()});
+    const recent=(recentAttempts||[]).map(a=>{const u=(students||[]).find(x=>x.id===a.user_id);return {...mapAttempt(a),user:u?{id:u.id,name:u.name,email:u.email}:null};}); res.json({totalUsers:totalUsers||0,activeUsers:active,totalAttempts:totalAttempts||0,recentAttempts:recent,students:(students||[]).map(u=>({...u,_id:u.id,lastSeenAt:u.last_seen_at,createdAt:u.created_at,loginCount:u.login_count||0,lastLoginAt:u.last_login_at})),scheduledTests:scheduledTests||0,generatedAt:new Date().toISOString()});
   }catch(e){err(res,e,500);}
 });
 app.get('/api/admin/users',auth,adminOnly,async(req,res)=>{const {data,error}=await db.from('profiles').select('id,name,email,role,last_seen_at,created_at').order('last_seen_at',{ascending:false}).limit(5000);if(error)return err(res,error,500);res.json({users:(data||[]).map(u=>({...u,_id:u.id,lastSeenAt:u.last_seen_at,createdAt:u.created_at}))});});

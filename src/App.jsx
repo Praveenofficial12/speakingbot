@@ -3,7 +3,7 @@ import {
   ArrowRight, BarChart3, Bell, Bookmark, BookOpen, BrainCircuit, Check,
   Calendar, ChevronLeft, ChevronRight, CircleHelp, Clock3, Code2, FileQuestion,
   Flame, Grid2X2, KeyRound, LayoutDashboard, Mail, Menu, Moon, Play, Plus, Search,
-  Settings, ShieldCheck, Sparkles, Sun, Target, Trash2, Trophy, UserRound, X, Zap
+  Settings, ShieldCheck, Sparkles, Sun, Target, Trash2, Trophy, UserRound, X, Zap, Upload, LogOut, RefreshCw
 } from 'lucide-react';
 
 const API = import.meta.env.VITE_API_URL || '/api';
@@ -54,7 +54,7 @@ function App() {
   const [lastResult, setLastResult] = useState(null);
   const [bookmarks, setBookmarks] = useState(() => { try { return JSON.parse(localStorage.getItem('sb-bookmarks') || '[]'); } catch { return []; } });
   const [user, setUser] = useState(() => { try { return JSON.parse(localStorage.getItem('sb-user') || 'null'); } catch { return null; } });
-  const [questions, setQuestions] = useState(QUESTIONS);
+  const [questions, setQuestions] = useState(QUESTIONS);\n  const [scheduledNotice, setScheduledNotice] = useState(null);
 
   useEffect(() => {
     document.documentElement.classList.toggle('dark', dark);
@@ -82,26 +82,20 @@ function App() {
     setPage('test');
   };
 
-  const startScheduled = (data) => { const test={...data.test,id:data.test.testId,questions:data.questions.length,questionsData:data.questions}; setActiveTest(test); setQuestions(data.questions); setAttempt({index:0,answers:{},marked:[],visited:[1],started:Date.now(),seconds:test.duration*60}); setPage('test'); localStorage.removeItem('sb-scheduled-access'); };
+  const startScheduled = (data) => { const endAt=new Date(data.window.endAt).getTime(); const remaining=Math.max(1,Math.floor((endAt-Date.now())/1000)); const test={...data.test,id:data.test.testId,questions:data.questions.length,questionsData:data.questions,scheduledAccessId:data.accessId,scheduledEndAt:endAt}; setActiveTest(test); setQuestions(data.questions); setAttempt({index:0,answers:{},marked:[],visited:[1],started:Date.now(),seconds:Math.min(test.duration*60,remaining)}); setPage('test'); setScheduledNotice(null); };
 
-  const submitTest = (answers) => {
+  const submitTest = async (answers) => {
     const activeQuestions = activeTest?.questionsData || questions;
     const correct = activeQuestions.filter(q => answers[q._id||q.id] === q.answer || answers[q._id] === q.answer).length;
     const answered = Object.keys(answers).length;
-    const result = {
-      score: correct,
-      max: activeQuestions.length,
-      percentage: activeQuestions.length ? Math.round((correct / activeQuestions.length) * 100) : 0,
-      correct,
-      incorrect: answered - correct,
-      skipped: activeQuestions.length - answered,
-      time: activeTest ? Math.max(1, Math.round((Date.now() - attempt.started) / 1000)) : 1,
-      test: activeTest || TESTS[0]
-    };
-    setLastResult(result);
-    if (localStorage.getItem('sb-token')) api('/attempts/submit', { method: 'POST', body: JSON.stringify({ testId: result.test.id, answers, durationSeconds: result.time }) }).catch(() => {});
-    setAttempt(null);
-    setPage('result');
+    const result = { score:correct, max:activeQuestions.length, percentage:activeQuestions.length?Math.round((correct/activeQuestions.length)*100):0, correct, incorrect:answered-correct, skipped:activeQuestions.length-answered, time:activeTest?Math.max(1,Math.round((Date.now()-attempt.started)/1000)):1, test:activeTest||TESTS[0] };
+    try {
+      if(localStorage.getItem('sb-token')) await api('/attempts/submit',{method:'POST',body:JSON.stringify({testId:result.test.id,answers,durationSeconds:result.time,scheduledAccessId:activeTest?.scheduledAccessId||null})});
+      setLastResult(result);setAttempt(null);setPage('result');
+    } catch(e) {
+      alert(e.message||'This assessment is no longer accepting answers.');
+      setAttempt(null);setPage('scheduled');
+    }
   };
 
   return (

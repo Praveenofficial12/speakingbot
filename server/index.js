@@ -187,7 +187,7 @@ app.get('/api/admin/schedules/:id/non-attendees',auth,adminOnly,async(req,res)=>
     if(re)throw re;
     let assigned=roster||[];
     if(!assigned.length&&s.audience==='global'){
-      const {data:users,error:ue}=await db.from('profiles').select('name,email,login_count').order('name');
+      const {data:users,error:ue}=await db.from('profiles').select('name,email,login_count').eq('role','student').order('name');
       if(ue)throw ue;assigned=users||[];
     } else if(!assigned.length&&s.email){
       const {data:u}=await db.from('profiles').select('name,email,login_count').eq('email',s.email).maybeSingle();

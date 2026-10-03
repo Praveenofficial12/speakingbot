@@ -152,6 +152,11 @@ app.post('/api/attempts/submit',auth,async(req,res)=>{
       if(now<start)return res.status(403).json({error:'Assessment has not started yet'});
       if(now>end)return res.status(403).json({error:'Assessment time has ended. Your answers were not accepted.'});
     }
+    if(scheduledAccessId){
+      const {data:existing,error:existingError}=await db.from('attempts').select('id').eq('user_id',req.user.id).eq('scheduled_access_id',Number(scheduledAccessId)).maybeSingle();
+      if(existingError)throw existingError;
+      if(existing)return res.status(409).json({error:'This scheduled assessment has already been submitted.'});
+    }
     const {data:qs,error}=await db.from('questions').select('id,answer').eq('test_id',testId).eq('published',true);
     if(error)throw error;if(!qs?.length)return res.status(404).json({error:'Test questions not found'});
     let correct=0;for(const q of qs)if(Number(answers?.[q.id])===q.answer)correct++;

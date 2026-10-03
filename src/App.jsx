@@ -90,9 +90,15 @@ function App() {
   const navigate = (next) => { setPage(next); setMobileOpen(false); window.scrollTo({ top: 0, behavior: 'smooth' }); };
 
   const startTest = async (test = TESTS[0]) => {
-    try { const data = await api('/tests/' + test.id); if (data.test) { test = { ...test, ...data.test, id: data.test.testId, questions: data.questions.length }; setQuestions(data.questions); } } catch { setQuestions(QUESTIONS); }
-    setActiveTest(test);
-    const started=Date.now(); const nextAttempt={ index: 0, answers: {}, marked: [], visited: [1], started, seconds: test.duration * 60 }; setAttempt(nextAttempt); localStorage.setItem('sb-active-attempt',JSON.stringify({attempt:nextAttempt,activeTest:test,questions:data?.questions||questions}));
+    let loadedQuestions = QUESTIONS;
+    try {
+      const data = await api('/tests/' + test.id);
+      if (data.test) { test = { ...test, ...data.test, id: data.test.testId, questions: data.questions.length }; loadedQuestions = data.questions; setQuestions(data.questions); }
+    } catch { setQuestions(QUESTIONS); }
+    const started=Date.now();
+    const nextAttempt={index:0,answers:{},marked:[],visited:[1],started,seconds:test.duration*60};
+    setActiveTest(test); setAttempt(nextAttempt);
+    localStorage.setItem('sb-active-attempt',JSON.stringify({attempt:nextAttempt,activeTest:test,questions:loadedQuestions}));
     setPage('test');
   };
 

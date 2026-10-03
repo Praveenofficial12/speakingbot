@@ -125,7 +125,7 @@ function App() {
       {page !== 'test' && <Header dark={dark} setDark={setDark} page={page} navigate={navigate} user={user} setUser={setUser} search={search} setSearch={setSearch} mobileOpen={mobileOpen} setMobileOpen={setMobileOpen} />}
       {page === 'home' && <Home navigate={navigate} startTest={startTest} />}
       {page === 'tests' && <Tests navigate={navigate} startTest={startTest} search={search} />}
-      {page === 'dashboard' && <Dashboard navigate={navigate} lastResult={lastResult} user={user} />}
+      {page === 'dashboard' && <Dashboard navigate={navigate} lastResult={lastResult} user={user} />}\n      {page === 'recommendations' && <Recommendations navigate={navigate} startTest={startTest} user={user} />}
       {page === 'scheduled' && <ScheduledTests user={user} navigate={navigate} startScheduled={startScheduled} />}
       {page === 'communication' && <CommunicationLab user={user} navigate={navigate} />}
       {page === 'test' && attempt && <TestEngine attempt={attempt} setAttempt={setAttempt} activeTest={activeTest} questions={questions} submitTest={submitTest} navigate={navigate} />}
@@ -145,9 +145,9 @@ function Header({ dark, setDark, page, navigate, search, setSearch, mobileOpen, 
       <div className="header-inner">
         <button className="brand" onClick={() => navigate('home')}><span className="brand-mark"><BrainCircuit size={20}/></span><span>Speaking<span>Bot</span></span></button>
         <nav className={mobileOpen ? 'nav open' : 'nav'}>
-          {['home','tests','communication','dashboard','bookmarks','scheduled'].map(item =>
+          {['home','tests','communication','dashboard','recommendations','bookmarks','scheduled'].map(item =>
             <button key={item} className={page === item ? 'active' : ''} onClick={() => navigate(item)}>
-              {item === 'home' ? 'Home' : item === 'tests' ? 'Practice Tests' : item === 'dashboard' ? 'Dashboard' : item === 'communication' ? 'Communication Lab' : item === 'scheduled' ? 'Assessments' : 'Bookmarks'}
+              {item === 'home' ? 'Home' : item === 'tests' ? 'Practice Tests' : item === 'dashboard' ? 'Dashboard' : item === 'recommendations' ? 'For You' : item === 'communication' ? 'Communication Lab' : item === 'scheduled' ? 'Assessments' : 'Bookmarks'}
             </button>
           )}
           {user?.role==='admin' && <button onClick={() => navigate('admin')}>Admin</button>}
@@ -313,6 +313,28 @@ function Dashboard({navigate,lastResult,user}) {
     {lastResult&&<div className="success-banner"><Check size={18}/><span>Latest result: <b>{lastResult.percentage}%</b> in {lastResult.test.title}.</span><button onClick={()=>navigate('result')}>View result <ArrowRight size={15}/></button></div>}
   </main>;
 }
+function Recommendations({navigate,startTest,user}) {
+  const [data,setData]=useState(null),[loading,setLoading]=useState(true),[error,setError]=useState('');
+  const load=()=>{if(!user){setLoading(false);return}setLoading(true);setError('');api('/my/recommendations').then(setData).catch(e=>setError(e.message||'Could not load recommendations.')).finally(()=>setLoading(false))};
+  useEffect(()=>{load()},[user]);
+  if(!user)return <main className="container page-pad"><Empty icon={<Sparkles/>} title="Sign in to get personalized recommendations" text="Your recommendations are generated from your own assessment and SWAR results." action={()=>navigate('login')} actionText="Sign in"/></main>;
+  const startRecommended=r=>{if(r.type==='swar'){navigate('communication');return}startTest({...r.test,id:r.test.testId})};
+  return <main className="container page-pad recommendations-page">
+    <div className="page-hero"><div><div className="kicker">Personalized practice engine</div><h1>Practice what needs attention.</h1><p>These recommendations update from your latest Supabase results and are visible only to you.</p></div><button className="btn secondary" onClick={load}><RefreshCw size={16}/> Refresh</button></div>
+    {loading?<div className="panel recommendation-loading">Analyzing your latest performance…</div>:error?<div className="panel error-panel">{error}<button className="btn secondary" onClick={load}>Try again</button></div>:
+    <><div className="recommendation-overview">
+      <div className="metric"><span><Target/></span><small>Focus topic</small><strong>{data?.focusTopic||'Start practicing'}</strong><em>{data?.focusScore!=null?data.focusScore+'% current average':'No score history yet'}</em></div>
+      <div className="metric"><span><Sparkles/></span><small>Recommendations</small><strong>{data?.recommendations?.length||0}</strong><em>Updated from latest results</em></div>
+      <div className="metric"><span><Trophy/></span><small>Recent performance</small><strong>{data?.overallAverage??'—'}{data?.overallAverage!=null?'%':''}</strong><em>Across your recorded results</em></div>
+    </div>
+    <section className="panel recommendation-engine-panel"><div className="panel-head"><div><small>Recommended for you</small><h3>Targeted practice</h3></div><span className="pill purple">{data?.recommendations?.length||0} actions</span></div>
+      {data?.recommendations?.length?<div className="engine-list">{data.recommendations.map((r,i)=><article className="engine-card" key={r.key||i}><div className="engine-rank">{i+1}</div><div className="engine-main"><div className="engine-meta"><span className={'pill '+(r.type==='swar'?'gold':'green')}>{r.type==='swar'?'SWAR module':'Practice test'}</span><span>{r.difficulty}</span><span>{r.duration} min</span></div><h3>{r.title}</h3><p>{r.reason}</p><div className="engine-tags"><span>Focus: {r.focus}</span><span>Current: {r.score==null?'New':r.score+'%'}</span><span>{r.type==='swar'?'Speaking practice':'Assessment practice'}</span></div></div><button className="btn primary" onClick={()=>startRecommended(r)}>Start Practice <ArrowRight size={16}/></button></article>)}</div>:<div className="empty-inline">Complete a few assessments or SWAR modules and your personalized practice plan will appear here.</div>}
+    </section>
+    <section className="panel"><div className="panel-head"><div><small>How it works</small><h3>Your recommendations stay practical</h3></div></div><div className="engine-rules"><div><b>1. Find weak areas</b><p>We calculate your recent average by test topic and SWAR module.</p></div><div><b>2. Match practice</b><p>We connect those areas to published tests and communication modules.</p></div><div><b>3. Refresh automatically</b><p>New results change the recommendations the next time you open or refresh this page.</p></div></div></section>
+    </>}
+  </main>;
+}
+
 function TestEngine({attempt,setAttempt,activeTest,questions,submitTest,navigate}) {
   const [seconds,setSeconds]=useState(attempt.seconds),[answers,setAnswers]=useState(attempt.answers),[showSubmit,setShowSubmit]=useState(false),[online,setOnline]=useState(navigator.onLine),[submitting,setSubmitting]=useState(false);
   const q=questions[attempt.index];

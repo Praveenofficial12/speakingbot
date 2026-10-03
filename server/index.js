@@ -170,6 +170,27 @@ app.get('/api/my/swar-results',auth,async(req,res)=>{const {data,error}=await db
 app.get('/api/admin/swar-results',auth,adminOnly,async(req,res)=>{const {data,error}=await db.from('swar_results').select('*').order('created_at',{ascending:false}).limit(1000);if(error)return err(res,error,500);res.json({results:data||[]});});
 app.get('/api/my/attempts',auth,async(req,res)=>{const {data,error}=await db.from('attempts').select('*').eq('user_id',req.user.id).order('completed_at',{ascending:false}).limit(100);if(error)return err(res,error,500);res.json({attempts:(data||[]).map(mapAttempt)});});
 
+app.get('/api/my/recommendations',auth,async(req,res)=>{
+  try{
+    const [{data:attempts,error:ae},{data:swar,error:se},{data:tests,error:te}]=await Promise.all([
+      db.from('attempts').select('test_id,percentage,completed_at').eq('user_id',req.user.id).order('completed_at',{ascending:false}).limit(100),
+      db.from('swar_results').select('module_id,module_title,score,created_at').eq('user_id',req.user.id).order('created_at',{ascending:false}).limit(100),
+      db.from('tests').select('*').eq('published',true).order('created_at',{ascending:false}).limit(200)
+    ]);
+    if(ae)throw ae;if(se)throw se;if(te)throw te;
+    const testMap=new Map((tests||[]).map(t=>[t.test_id,t])),topicMap=new Map(),moduleMap=new Map();
+    for(const a of attempts||[]){const t=testMap.get(a.test_id),topic=t?.topic||t?.category||a.test_id,m=topicMap.get(topic)||{score:0,count:0,latest:a.completed_at};m.score+=Number(a.percentage)||0;m.count++;if(new Date(a.completed_at)>new Date(m.latest))m.latest=a.completed_at;topicMap.set(topic,m);}
+    for(const s of swar||[]){const key=s.module_id||s.module_title,m=moduleMap.get(key)||{title:s.module_title,score:0,count:0,latest:s.created_at};m.score+=Number(s.score)||0;m.count++;if(new Date(s.created_at)>new Date(m.latest))m.latest=s.created_at;moduleMap.set(key,m);}
+    const weak=[...topicMap.entries()].map(([topic,m])=>({type:'test',focus:topic,score:Math.round(m.score/m.count),latest:m.latest})),...modules=[];
+    const swarWeak=[...moduleMap.entries()].map(([id,m])=>({type:'swar',focus:m.title,score:Math.round(m.score/m.count),latest:m.latest,id}));
+    const ordered=[...weak,...swarWeak].sort((a,b)=>a.score-b.score||new Date(b.latest)-new Date(a.latest)),recs=[];
+    const moduleTitles={'listen-repeat':'Listen & Repeat','read-repeat':'Read & Repeat','incorrect-correction':'Listen Incorrect Sentence & Correct It','grammar':'Grammar','story':'Story & Answer','jam':'JAM — Just A Minute'};
+    for(const w of ordered){if(recs.length>=6)break;if(w.type==='test'){const matches=(tests||[]).filter(t=>String(t.topic||t.category||'').toLowerCase().includes(String(w.focus).toLowerCase())||String(w.focus).toLowerCase().includes(String(t.topic||'').toLowerCase())).slice(0,2);for(const t of matches){if(recs.length>=6)break;recs.push({key:'test-'+t.test_id,type:'test',title:t.title,test:mapTest(t),difficulty:t.difficulty||'Medium',duration:Number(t.duration||15),focus:w.focus,score:w.score,reason:'Your '+w.focus+' average is '+w.score+'%. Practice this set to target that area.'});}}else{recs.push({key:'swar-'+w.id,type:'swar',title:w.focus||moduleTitles[w.id]||'SWAR Communication Practice',difficulty:'Adaptive',duration:w.id==='story'?2:1,focus:w.focus,score:w.score,reason:'Your '+w.focus+' average is '+w.score+'%. Repeat this module to strengthen your communication performance.'});}}
+    if(!recs.length)(tests||[]).slice(0,3).forEach(t=>recs.push({key:'starter-'+t.test_id,type:'test',title:t.title,test:mapTest(t),difficulty:t.difficulty||'Medium',duration:Number(t.duration||15),focus:t.topic||t.category||'Placement skills',score:null,reason:'You have limited result history, so this starter set helps build your performance profile.'}));
+    const allScores=[...(attempts||[]).map(x=>Number(x.percentage)||0),...(swar||[]).map(x=>Number(x.score)||0)],focus=ordered[0];
+    res.json({focusTopic:focus?.focus||null,focusScore:focus?.score??null,overallAverage:allScores.length?Math.round(allScores.reduce((a,b)=>a+b,0)/allScores.length):null,recommendations:recs});
+  }catch(e){err(res,e,500);}
+});
 app.get('/api/my/scheduled-tests',auth,async(req,res)=>{
   const {data,error}=await db.from('assessment_access').select('*').eq('active',true).gte('end_at',new Date().toISOString()).or(`email.eq.${req.user.email},audience.eq.global`).order('start_at');
   if(error)return err(res,error,500);

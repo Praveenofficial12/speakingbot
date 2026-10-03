@@ -60,3 +60,8 @@
 .engine-rules{display:grid;grid-template-columns:repeat(3,1fr);gap:12px}.engine-rules>div{padding:14px;border:1px solid var(--line);border-radius:12px}.engine-rules b{font-size:11px}.engine-rules p{font-size:9px;color:var(--muted);line-height:1.5;margin:5px 0 0}
 .recommendation-loading{padding:30px;text-align:center;color:var(--muted)}.error-panel{display:flex;align-items:center;justify-content:space-between;gap:12px;color:var(--danger)}
 @media(max-width:800px){.recommendation-overview,.engine-rules{grid-template-columns:1fr}.engine-card{align-items:flex-start;flex-wrap:wrap}.engine-card>.btn{margin-left:46px}}
+
+.adaptive-progress{margin-bottom:18px}.progress-summary{display:grid;gap:10px}.progress-summary>div:first-child{display:grid;gap:4px}.progress-summary span{font-size:10px;color:var(--muted)}.progress-summary b{font-size:14px}.progress-track{height:9px;background:var(--surface2);border-radius:999px;overflow:hidden}.progress-track i{display:block;height:100%;background:var(--primary);border-radius:inherit;transition:width .3s ease}.progress-summary>small{font-size:9px;color:var(--muted)}
+@media(min-width:1000px){.recommendation-overview{grid-template-columns:repeat(4,1fr)}}
+@media(max-width:800px){.recommendation-overview{grid-template-columns:1fr 1fr}}
+@media(max-width:600px){.recommendation-overview{grid-template-columns:1fr}.adaptive-progress .panel-head{align-items:flex-start;gap:10px}}

@@ -23,3 +23,28 @@
 .swar-evaluation{margin-top:18px;padding:20px;border:1px solid var(--line);border-radius:14px;background:var(--surface-2)}.evaluation-head{display:flex;justify-content:space-between;align-items:center}.evaluation-head h3{font-size:26px;margin:4px 0 0}.evaluation-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin:16px 0}.evaluation-grid>div{padding:14px;border:1px solid var(--line);border-radius:10px;text-align:center}.evaluation-grid b{display:block;font-size:22px}.evaluation-grid small{color:var(--muted)}.swar-evaluation>p{line-height:1.5;margin:8px 0}.swar-evaluation>small{color:var(--muted);line-height:1.5;display:block}.stage-actions{flex-wrap:wrap}@media(max-width:600px){.evaluation-grid{grid-template-columns:1fr}.evaluation-head{gap:12px;align-items:flex-start}.stage-actions .btn{flex:1;min-width:150px}}
 
 .panel-actions{display:flex;gap:8px;flex-wrap:wrap}.swar-filters{display:grid;grid-template-columns:1.2fr 1.2fr 1fr 1fr auto;gap:10px;margin:18px 0}.swar-filters select,.swar-filters input{min-width:0}.swar-module-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin:16px 0}.empty-inline{padding:28px;text-align:center;color:var(--muted);border:1px dashed var(--line);border-radius:12px;grid-column:1/-1}.swar-results-list{margin-top:22px}.swar-summary{grid-template-columns:repeat(5,1fr)}@media(max-width:900px){.swar-filters{grid-template-columns:1fr 1fr}.swar-module-grid{grid-template-columns:1fr 1fr}.swar-summary{grid-template-columns:repeat(3,1fr)}}@media(max-width:600px){.swar-filters{grid-template-columns:1fr}.swar-module-grid,.swar-summary{grid-template-columns:1fr}}
+
+.performance-page .performance-actions{display:flex;gap:9px;flex-wrap:wrap}
+.performance-summary{grid-template-columns:repeat(4,1fr)}
+.performance-grid{display:grid;grid-template-columns:1.35fr 1fr;gap:18px;margin-top:18px}
+.performance-trend{min-height:300px}
+.performance-chart{height:205px;display:flex;align-items:end;gap:10px;padding:20px 10px 0;border-bottom:1px solid var(--line)}
+.performance-bar{height:100%;flex:1;display:flex;flex-direction:column;justify-content:end;align-items:center;gap:6px;min-width:0}
+.performance-bar i{width:100%;max-width:42px;background:var(--primary);border-radius:7px 7px 2px 2px;min-height:8px}
+.performance-bar small{font-size:8px;color:var(--muted)}
+.bar-value{font-size:9px;color:var(--muted);font-weight:800}
+.compare-card{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.compare-card>div{padding:18px;border:1px solid var(--line);border-radius:12px;display:grid;gap:5px}
+.compare-icon{font-size:20px}.compare-card b{font-size:11px}.compare-card strong{font:800 25px Manrope}.compare-card small{font-size:9px;color:var(--muted)}
+.mini-progress{display:grid;gap:7px;margin-top:18px}.mini-progress>div:not(.progress){display:flex;justify-content:space-between;font-size:10px}.mini-progress b{font-size:10px}.mini-progress .progress{margin-bottom:5px}
+.performance-topic{display:grid;grid-template-columns:1fr auto;gap:5px 12px;padding:13px 0;border-top:1px solid var(--line)}
+.performance-topic>div{display:grid;gap:3px}.performance-topic b{font-size:11px}.performance-topic span{font-size:9px;color:var(--muted)}.performance-topic>strong{font-size:12px}.performance-topic .progress{grid-column:1/-1}
+.weak-area{display:flex;align-items:center;gap:10px;padding:12px 0;border-top:1px solid var(--line)}
+.weak-area>span{width:24px;height:24px;border-radius:7px;background:var(--surface2);display:grid;place-items:center;font-size:10px}
+.weak-area>div{flex:1;display:grid;gap:3px}.weak-area b{font-size:11px}.weak-area small{font-size:9px;color:var(--muted)}.weak-area>strong{font-size:11px}
+.recommendations-panel{margin-top:18px}.recommendation-grid{display:grid;gap:9px}.practice-recommendation{display:flex;align-items:center;gap:12px;padding:13px;border:1px solid var(--line);border-radius:11px}
+.rec-number{width:27px;height:27px;border-radius:8px;background:var(--purple-bg);color:var(--primary);display:grid;place-items:center;font-weight:800;font-size:10px}
+.practice-recommendation>div{flex:1}.practice-recommendation b{font-size:11px}.practice-recommendation p{margin:3px 0 0;font-size:9px;color:var(--muted)}
+.loading-note{margin-top:12px;text-align:center;color:var(--muted);font-size:10px}
+@media(max-width:900px){.performance-summary{grid-template-columns:1fr 1fr}.performance-grid{grid-template-columns:1fr}}
+@media(max-width:600px){.performance-summary{grid-template-columns:1fr}.compare-card{grid-template-columns:1fr}.performance-chart{gap:5px}.practice-recommendation{align-items:flex-start;flex-wrap:wrap}.practice-recommendation .btn{margin-left:auto}}

@@ -171,7 +171,7 @@ app.get('/api/tests/:testId',async(req,res)=>{
 
 app.post('/api/attempts/submit',auth,async(req,res)=>{
   try{
-    const {testId,answers,durationSeconds,scheduledAccessId}=req.body||{};
+    const {testId,answers,durationSeconds,scheduledAccessId,practiceContext}=req.body||{};
     if(scheduledAccessId){
       const {data:access,error:accessError}=await db.from('assessment_access').select('*').eq('id',scheduledAccessId).eq('active',true).maybeSingle();
       if(accessError)throw accessError;
@@ -191,7 +191,9 @@ app.post('/api/attempts/submit',auth,async(req,res)=>{
     const maxScore=qs.length,answered=Object.keys(answers||{}).length;
     const {data:attempt,error:ae}=await db.from('attempts').insert({user_id:req.user.id,test_id:testId,score:correct,max_score:maxScore,percentage:Math.round(correct/maxScore*100),duration_seconds:Math.max(0,Number(durationSeconds||0)),scheduled_access_id:scheduledAccessId?Number(scheduledAccessId):null}).select('*').single();
     if(ae)throw ae;
-    await db.from('practice_history').insert({user_id:req.user.id,practice_type:'test',practice_key:String(testId),title:String(testId),focus:null,score:Math.round(correct/maxScore*100)});
+    if(practiceContext?.source==='recommendations'){
+      await db.from('practice_history').insert({user_id:req.user.id,practice_type:'test',practice_key:String(practiceContext.recommendationKey||testId),title:String(practiceContext.title||testId),focus:practiceContext.focus||null,score:Math.round(correct/maxScore*100)});
+    }
     const progress=await updatePracticeProgress(req.user.id);
     res.status(201).json({attempt:mapAttempt(attempt),correct,answered,skipped:Math.max(0,maxScore-answered),questions:maxScore,progress});
   }catch(e){err(res,e,400);}

@@ -117,7 +117,7 @@ function App() {
     const answered = Object.keys(answers).length;
     const result = { score:correct, max:activeQuestions.length, percentage:activeQuestions.length?Math.round((correct/activeQuestions.length)*100):0, correct, incorrect:answered-correct, skipped:activeQuestions.length-answered, time:activeTest?Math.max(1,Math.round((Date.now()-attempt.started)/1000)):1, test:activeTest||TESTS[0] };
     try {
-      if(localStorage.getItem('sb-token')) await api('/attempts/submit',{method:'POST',body:JSON.stringify({testId:result.test.id,answers,durationSeconds:result.time,scheduledAccessId:activeTest?.scheduledAccessId||null})});
+      if(localStorage.getItem('sb-token')) await api('/attempts/submit',{method:'POST',body:JSON.stringify({testId:result.test.id,answers,durationSeconds:result.time,scheduledAccessId:activeTest?.scheduledAccessId||null,practiceContext:activeTest?.practiceContext||null})});
       setLastResult(result);setAttempt(null);localStorage.removeItem('sb-active-attempt');localStorage.removeItem('sb-submitting');setPage('result');
     } catch(e) {
       alert(e.message||'This assessment is no longer accepting answers.');
@@ -320,7 +320,8 @@ function Dashboard({navigate,lastResult,user}) {
 }
 function Recommendations({navigate,startTest,user}) {
   const [data,setData]=useState(null),[loading,setLoading]=useState(true),[error,setError]=useState('');
-  const load=()=>{if(!user){setLoading(false);return}setLoading(true);setError('');api('/my/recommendations').then(setData).catch(e=>setError(e.message||'Could not load recommendations.')).finally(()=>setLoading(false))};
+  const [progress,setProgress]=useState(null);
+  const load=()=>{if(!user){setLoading(false);return}setLoading(true);setError('');Promise.all([api('/my/recommendations'),api('/my/progress')]).then(([recommendations,p])=>{setData(recommendations);setProgress(p.progress||recommendations.progress||null)}).catch(e=>setError(e.message||'Could not load recommendations.')).finally(()=>setLoading(false))};
   useEffect(()=>{load()},[user]);
   useEffect(()=>{const refresh=()=>load();window.addEventListener('sb-recommendations-refresh',refresh);return()=>window.removeEventListener('sb-recommendations-refresh',refresh)},[user]);
   if(!user)return <main className="container page-pad"><Empty icon={<Sparkles/>} title="Sign in to get personalized recommendations" text="Your recommendations are generated from your own assessment and SWAR results." action={()=>navigate('login')} actionText="Sign in"/></main>;
@@ -335,6 +336,13 @@ function Recommendations({navigate,startTest,user}) {
     <div className="page-hero"><div><div className="kicker">Personalized practice engine</div><h1>Practice what needs attention.</h1><p>These recommendations update from your latest Supabase results and are visible only to you.</p></div><button className="btn secondary" onClick={load}><RefreshCw size={16}/> Refresh</button></div>
     {loading?<div className="panel recommendation-loading">Analyzing your latest performance…</div>:error?<div className="panel error-panel">{error}<button className="btn secondary" onClick={load}>Try again</button></div>:
     <><div className="recommendation-overview">
+      <div className="metric"><span><Check/></span><small>Practices completed</small><strong>{progress?.completed_recommendations??0}</strong><em>{progress?.total_practice??0} total practice sessions</em></div>
+      <div className="metric"><span><Target/></span><small>Current focus</small><strong>{progress?.current_focus||data?.focusTopic||'Start practicing'}</strong><em>{progress?.current_focus_score!=null?progress.current_focus_score+'% current score':'Build your first score'}</em></div>
+      <div className="metric"><span><Flame/></span><small>Practice streak</small><strong>{progress?.streak_days??0} day{(progress?.streak_days??0)===1?'':'s'}</strong><em>Consecutive practice days</em></div>
+      <div className="metric"><span><Zap/></span><small>Improvement</small><strong>{progress?.improvement_percentage??0}%</strong><em>Compared with previous practice</em></div>
+    </div>
+    <section className="panel adaptive-progress"><div className="panel-head"><div><small>Adaptive progress</small><h3>Your next step</h3></div><span className="pill purple">Personalized</span></div><div className="progress-summary"><div><span>Next recommended activity</span><b>{progress?.next_activity||data?.recommendations?.[0]?.title||'Complete a practice session'}</b></div><div className="progress-track"><i style={{width:(Math.min(100,Math.max(0,Number(progress?.current_focus_score||0))))+'%'}}/></div><small>{progress?.current_focus_score!=null?'Current focus score: '+progress.current_focus_score+'%':'Your progress will appear after your first result.'}</small></div></section>
+    <div className="recommendation-overview">
       <div className="metric"><span><Target/></span><small>Focus topic</small><strong>{data?.focusTopic||'Start practicing'}</strong><em>{data?.focusScore!=null?data.focusScore+'% current average':'No score history yet'}</em></div>
       <div className="metric"><span><Sparkles/></span><small>Recommendations</small><strong>{data?.recommendations?.length||0}</strong><em>Updated from latest results</em></div>
       <div className="metric"><span><Trophy/></span><small>Recent performance</small><strong>{data?.overallAverage??'—'}{data?.overallAverage!=null?'%':''}</strong><em>Across your recorded results</em></div>

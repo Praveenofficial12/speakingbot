@@ -56,6 +56,19 @@ function App() {
   const [user, setUser] = useState(() => { try { return JSON.parse(localStorage.getItem('sb-user') || 'null'); } catch { return null; } });
   const [questions, setQuestions] = useState(QUESTIONS);
   const [scheduledNotice, setScheduledNotice] = useState(null);
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem('sb-active-attempt');
+      if (!raw) return;
+      const saved = JSON.parse(raw);
+      if (saved?.attempt && saved?.activeTest && Array.isArray(saved?.questions) && saved.questions.length) {
+        const remaining = Math.max(0, Math.floor((saved.activeTest.scheduledEndAt ? (new Date(saved.activeTest.scheduledEndAt).getTime()-Date.now())/1000 : saved.attempt.seconds)));
+        const restored = {...saved.attempt, seconds: saved.activeTest.scheduledEndAt ? Math.min(saved.attempt.seconds, remaining) : saved.attempt.seconds};
+        if (restored.seconds > 0) { setActiveTest(saved.activeTest); setQuestions(saved.questions); setAttempt(restored); setPage('test'); }
+        else localStorage.removeItem('sb-active-attempt');
+      }
+    } catch { localStorage.removeItem('sb-active-attempt'); }
+  }, []);
 
   useEffect(() => {
     document.documentElement.classList.toggle('dark', dark);
@@ -79,23 +92,25 @@ function App() {
   const startTest = async (test = TESTS[0]) => {
     try { const data = await api('/tests/' + test.id); if (data.test) { test = { ...test, ...data.test, id: data.test.testId, questions: data.questions.length }; setQuestions(data.questions); } } catch { setQuestions(QUESTIONS); }
     setActiveTest(test);
-    setAttempt({ index: 0, answers: {}, marked: [], visited: [1], started: Date.now(), seconds: test.duration * 60 });
+    const started=Date.now(); const nextAttempt={ index: 0, answers: {}, marked: [], visited: [1], started, seconds: test.duration * 60 }; setAttempt(nextAttempt); localStorage.setItem('sb-active-attempt',JSON.stringify({attempt:nextAttempt,activeTest:test,questions:data?.questions||questions}));
     setPage('test');
   };
 
-  const startScheduled = (data) => { const endAt=new Date(data.window.endAt).getTime(); const remaining=Math.max(1,Math.floor((endAt-Date.now())/1000)); const test={...data.test,id:data.test.testId,questions:data.questions.length,questionsData:data.questions,scheduledAccessId:data.accessId,scheduledEndAt:endAt}; setActiveTest(test); setQuestions(data.questions); setAttempt({index:0,answers:{},marked:[],visited:[1],started:Date.now(),seconds:Math.min(test.duration*60,remaining)}); setPage('test'); setScheduledNotice(null); };
+  const startScheduled = (data) => { const endAt=new Date(data.window.endAt).getTime(); const remaining=Math.max(1,Math.floor((endAt-Date.now())/1000)); const test={...data.test,id:data.test.testId,questions:data.questions.length,questionsData:data.questions,scheduledAccessId:data.accessId,scheduledEndAt:endAt}; setActiveTest(test); setQuestions(data.questions); const started=Date.now(); const nextAttempt={index:0,answers:{},marked:[],visited:[1],started,seconds:Math.min(test.duration*60,remaining)}; setAttempt(nextAttempt); localStorage.setItem('sb-active-attempt',JSON.stringify({attempt:nextAttempt,activeTest:test,questions:data.questions})); setPage('test'); setScheduledNotice(null); };
 
   const submitTest = async (answers) => {
+    if (localStorage.getItem('sb-submitting') === '1') return;
+    localStorage.setItem('sb-submitting','1');
     const activeQuestions = activeTest?.questionsData || questions;
     const correct = activeQuestions.filter(q => answers[q._id||q.id] === q.answer || answers[q._id] === q.answer).length;
     const answered = Object.keys(answers).length;
     const result = { score:correct, max:activeQuestions.length, percentage:activeQuestions.length?Math.round((correct/activeQuestions.length)*100):0, correct, incorrect:answered-correct, skipped:activeQuestions.length-answered, time:activeTest?Math.max(1,Math.round((Date.now()-attempt.started)/1000)):1, test:activeTest||TESTS[0] };
     try {
       if(localStorage.getItem('sb-token')) await api('/attempts/submit',{method:'POST',body:JSON.stringify({testId:result.test.id,answers,durationSeconds:result.time,scheduledAccessId:activeTest?.scheduledAccessId||null})});
-      setLastResult(result);setAttempt(null);setPage('result');
+      setLastResult(result);setAttempt(null);localStorage.removeItem('sb-active-attempt');localStorage.removeItem('sb-submitting');setPage('result');
     } catch(e) {
       alert(e.message||'This assessment is no longer accepting answers.');
-      setAttempt(null);setPage('scheduled');
+      setAttempt(null);localStorage.removeItem('sb-active-attempt');localStorage.removeItem('sb-submitting');setPage('scheduled');
     }
   };
 
@@ -220,20 +235,26 @@ function Dashboard({navigate,lastResult,user}) {
 }
 
 function TestEngine({attempt,setAttempt,activeTest,questions,submitTest,navigate}) {
-  const [seconds,setSeconds]=useState(attempt.seconds);
-  const [answers,setAnswers]=useState(attempt.answers);
-  const [showSubmit,setShowSubmit]=useState(false);
+  const [seconds,setSeconds]=useState(attempt.seconds),[answers,setAnswers]=useState(attempt.answers),[showSubmit,setShowSubmit]=useState(false),[online,setOnline]=useState(navigator.onLine),[submitting,setSubmitting]=useState(false);
   const q=questions[attempt.index];
-  useEffect(()=>{ const id=setInterval(()=>setSeconds(s=>s>0?s-1:0),1000); return()=>clearInterval(id)},[]);
-  useEffect(()=>{ if(seconds===0) submitTest(answers); },[seconds]);
-  const choose=(idx)=>{ const key=q._id || q.id; const next={...answers,[key]:idx}; setAnswers(next); setAttempt({...attempt,answers:next}); };
-  const go=(delta)=>{ const n=Math.max(0,Math.min(questions.length-1,attempt.index+delta)); const key=questions[n]._id||questions[n].id; setAttempt({...attempt,index:n,visited:Array.from(new Set([...(attempt.visited||[]),key]))}); };
-  const mark=()=>setAttempt({...attempt,marked:attempt.marked.includes(q._id||q.id)?attempt.marked.filter(x=>x!==(q._id||q.id)):[...attempt.marked,q._id||q.id]});
+  useEffect(()=>{const on=()=>setOnline(true),off=()=>setOnline(false);window.addEventListener('online',on);window.addEventListener('offline',off);return()=>{window.removeEventListener('online',on);window.removeEventListener('offline',off)}},[]);
+  useEffect(()=>{const id=setInterval(()=>setSeconds(s=>s>0?s-1:0),1000);return()=>clearInterval(id)},[]);
+  useEffect(()=>{if(seconds===0&&!submitting){setSubmitting(true);submitTest(answers)}},[seconds]);
+  useEffect(()=>{
+    const next={...attempt,answers,seconds};
+    setAttempt(next);
+    localStorage.setItem('sb-active-attempt',JSON.stringify({attempt:next,activeTest,questions}));
+  },[answers,seconds]);
+  useEffect(()=>{const save=()=>localStorage.setItem('sb-active-attempt',JSON.stringify({attempt:{...attempt,answers,seconds},activeTest,questions}));window.addEventListener('beforeunload',save);return()=>window.removeEventListener('beforeunload',save)},[attempt,answers,seconds,activeTest,questions]);
+  const choose=idx=>{const key=q._id||q.id;setAnswers({...answers,[key]:idx})};
+  const go=delta=>{const n=Math.max(0,Math.min(questions.length-1,attempt.index+delta));const key=questions[n]._id||questions[n].id;setAttempt({...attempt,index:n,visited:Array.from(new Set([...(attempt.visited||[]),key]))})};
+  const mark=()=>{const key=q._id||q.id;setAttempt({...attempt,marked:attempt.marked.includes(key)?attempt.marked.filter(x=>x!==key):[...attempt.marked,key]})};
+  const submit=()=>{if(!online){setShowSubmit(false);alert('You are offline. Your answers are safely saved on this device. Reconnect to submit the assessment.');return}setSubmitting(true);submitTest(answers)};
   const fmt=s=>`${String(Math.floor(s/60)).padStart(2,'0')}:${String(s%60).padStart(2,'0')}`;
-  return <div className="exam-page"><header className="exam-header"><button className="brand" onClick={()=>navigate('home')}><span className="brand-mark"><BrainCircuit size={20}/></span><span>Speaking<span>Bot</span></span></button><div className="exam-name">{activeTest?.title}</div><div className={'timer '+(seconds<120?'danger':'')}><Clock3 size={17}/>{fmt(seconds)}</div><button className="btn danger-btn" onClick={()=>setShowSubmit(true)}>Submit test</button></header>
+  return <div className="exam-page"><header className="exam-header"><button className="brand" onClick={()=>navigate('home')}><span className="brand-mark"><BrainCircuit size={20}/></span><span>Speaking<span>Bot</span></span></button><div className="exam-name">{activeTest?.title}</div><div className="exam-status"><span className={online?'online-dot':'offline-dot'}/>{online?'Connected':'Offline — answers saved'}</div><div className={'timer '+(seconds<120?'danger':'')}><Clock3 size={17}/>{fmt(seconds)}</div><button className="btn danger-btn" disabled={submitting} onClick={()=>setShowSubmit(true)}>{submitting?'Submitting…':'Submit test'}</button></header>
     <div className="exam-layout"><aside className="question-nav"><div className="nav-title"><b>Questions</b><small>{Object.keys(answers).length}/{questions.length} answered</small></div><div className="legend"><span><i className="answered"/>Answered</span><span><i className="review"/>Review</span></div><div className="palette">{questions.map((x,i)=><button key={x._id||x.id} className={(i===attempt.index?'current ':'')+(answers[x._id||x.id]!==undefined?'answered ':'')+(attempt.marked.includes(x._id||x.id)?'review':'')} onClick={()=>setAttempt({...attempt,index:i})}>{i+1}</button>)}</div></aside>
-    <section className="question-area"><div className="question-top"><span className="pill purple">{q.topic}</span><span>{q.difficulty}</span></div><div className="question-number">Question {attempt.index+1} <span>of {questions.length}</span></div><h1>{q.text}</h1><div className="options">{q.options.map((o,i)=><button key={o} className={answers[q._id||q.id]===i?'selected':''} onClick={()=>choose(i)}><span>{String.fromCharCode(65+i)}</span>{o}{answers[q._id||q.id]===i&&<Check size={18}/>}</button>)}</div><div className="question-actions"><button className="text-btn" onClick={mark}><Bookmark size={16} fill={attempt.marked.includes(q._id||q.id)?'currentColor':'none'}/>{attempt.marked.includes(q._id||q.id)?'Marked for review':'Mark for review'}</button>{answers[q._id||q.id]!==undefined&&<button className="clear-btn" onClick={()=>{const n={...answers};delete n[q._id||q.id];setAnswers(n);setAttempt({...attempt,answers:n})}}>Clear answer</button>}</div><div className="exam-footer"><button className="btn secondary" disabled={attempt.index===0} onClick={()=>go(-1)}><ChevronLeft size={17}/> Previous</button><button className="btn primary" onClick={()=>attempt.index===questions.length-1?setShowSubmit(true):go(1)}>{attempt.index===questions.length-1?'Review & submit':'Next question'} <ChevronRight size={17}/></button></div></section></div>
-    {showSubmit&&<Modal title="Submit your test?" close={()=>setShowSubmit(false)}><p>You have answered <b>{Object.keys(answers).length}</b> of {questions.length} questions. Unanswered questions will be counted as skipped.</p><div className="submit-summary"><span>Answered <b>{Object.keys(answers).length}</b></span><span>Skipped <b>{questions.length-Object.keys(answers).length}</b></span><span>Marked <b>{attempt.marked.length}</b></span></div><div className="modal-actions"><button className="btn secondary" onClick={()=>setShowSubmit(false)}>Keep practicing</button><button className="btn primary" onClick={()=>submitTest(answers)}>Submit now <ArrowRight size={16}/></button></div></Modal>}
+    <section className="question-area"><div className="question-top"><span className="pill purple">{q.topic}</span><span>{q.difficulty}</span></div><div className="question-number">Question {attempt.index+1} <span>of {questions.length}</span></div><h1>{q.text}</h1><div className="options">{q.options.map((o,i)=><button key={o} className={answers[q._id||q.id]===i?'selected':''} onClick={()=>choose(i)}><span>{String.fromCharCode(65+i)}</span>{o}{answers[q._id||q.id]===i&&<Check size={18}/>}</button>)}</div><div className="question-actions"><button className="text-btn" onClick={mark}><Bookmark size={16} fill={attempt.marked.includes(q._id||q.id)?'currentColor':'none'}/>{attempt.marked.includes(q._id||q.id)?'Marked for review':'Mark for review'}</button>{answers[q._id||q.id]!==undefined&&<button className="clear-btn" onClick={()=>{const n={...answers};delete n[q._id||q.id];setAnswers(n)}}>Clear answer</button>}</div><div className="exam-footer"><button className="btn secondary" disabled={attempt.index===0} onClick={()=>go(-1)}><ChevronLeft size={17}/> Previous</button><button className="btn primary" onClick={()=>attempt.index===questions.length-1?setShowSubmit(true):go(1)}>{attempt.index===questions.length-1?'Review & submit':'Next question'} <ChevronRight size={17}/></button></div></section></div>
+    {showSubmit&&<Modal title="Submit your test?" close={()=>setShowSubmit(false)}><p>You have answered <b>{Object.keys(answers).length}</b> of {questions.length} questions. {online?'Unanswered questions will be counted as skipped.':'You are offline. Reconnect before submitting.'}</p><div className="submit-summary"><span>Answered <b>{Object.keys(answers).length}</b></span><span>Skipped <b>{questions.length-Object.keys(answers).length}</b></span><span>Marked <b>{attempt.marked.length}</b></span></div><div className="modal-actions"><button className="btn secondary" onClick={()=>setShowSubmit(false)}>Keep practicing</button><button className="btn primary" disabled={!online||submitting} onClick={submit}>{submitting?'Submitting…':'Submit now'} <ArrowRight size={16}/></button></div></Modal>}
   </div>;
 }
 

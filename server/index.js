@@ -181,7 +181,7 @@ app.get('/api/my/recommendations',auth,async(req,res)=>{
     const testMap=new Map((tests||[]).map(t=>[t.test_id,t])),topicMap=new Map(),moduleMap=new Map();
     for(const a of attempts||[]){const t=testMap.get(a.test_id),topic=t?.topic||t?.category||a.test_id,m=topicMap.get(topic)||{score:0,count:0,latest:a.completed_at};m.score+=Number(a.percentage)||0;m.count++;if(new Date(a.completed_at)>new Date(m.latest))m.latest=a.completed_at;topicMap.set(topic,m);}
     for(const s of swar||[]){const key=s.module_id||s.module_title,m=moduleMap.get(key)||{title:s.module_title,score:0,count:0,latest:s.created_at};m.score+=Number(s.score)||0;m.count++;if(new Date(s.created_at)>new Date(m.latest))m.latest=s.created_at;moduleMap.set(key,m);}
-    const weak=[...topicMap.entries()].map(([topic,m])=>({type:'test',focus:topic,score:Math.round(m.score/m.count),latest:m.latest})),...modules=[];
+    const weak=[...topicMap.entries()].map(([topic,m])=>({type:'test',focus:topic,score:Math.round(m.score/m.count),latest:m.latest}));
     const swarWeak=[...moduleMap.entries()].map(([id,m])=>({type:'swar',focus:m.title,score:Math.round(m.score/m.count),latest:m.latest,id}));
     const ordered=[...weak,...swarWeak].sort((a,b)=>a.score-b.score||new Date(b.latest)-new Date(a.latest)),recs=[];
     const moduleTitles={'listen-repeat':'Listen & Repeat','read-repeat':'Read & Repeat','incorrect-correction':'Listen Incorrect Sentence & Correct It','grammar':'Grammar','story':'Story & Answer','jam':'JAM — Just A Minute'};

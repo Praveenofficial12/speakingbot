@@ -229,17 +229,90 @@ function Tests({navigate,startTest,search}) {
 
 function Dashboard({navigate,lastResult,user}) {
   const [attempts,setAttempts]=useState([]);
-  useEffect(()=>{ if(!user) return; api('/my/attempts').then(d=>setAttempts(d.attempts||[])).catch(()=>{}); },[user]);
-  const avg=attempts.length?Math.round(attempts.reduce((s,a)=>s+(a.percentage||0),0)/attempts.length):0;
-  const recent=attempts.slice(0,5);
-  return <main className="container page-pad"><div className="dashboard-head"><div><div className="kicker">Good morning{user?.name ? ', ' + user.name.split(' ')[0] : ''}</div><h1>Your practice dashboard.</h1><p>Keep your streak alive and turn weak areas into strengths.</p></div><button className="btn primary" onClick={()=>navigate('tests')}><Plus size={18}/> New practice</button></div>
-    <div className="stats-grid">{[['Tests attempted',attempts.length,'From your account',<BookOpen/>],['Average score',avg+'%','Across completed tests',<Target/>],['Accuracy',avg+'%','Server-recorded results',<BarChart3/>],['Practice streak','—','Keep practicing daily',<Flame/>]].map(([a,b,c,i])=><div className="metric" key={a}><span>{i}</span><small>{a}</small><strong>{b}</strong><em>{c}</em></div>)}</div>
-    <div className="dashboard-grid"><section className="panel"><div className="panel-head"><div><small>Performance</small><h3>Score trend</h3></div><select><option>Last 30 days</option><option>Last 7 days</option></select></div><div className="big-chart">{[48,56,51,68,62,74,71,84,79,87].map((h,i)=><div key={i} className="chart-bar"><i style={{height:h+'%'}}/><small>{i+1}</small></div>)}</div></section><section className="panel"><div className="panel-head"><div><small>Topic mastery</small><h3>Where you stand</h3></div></div>{[['Java OOP',87],['SQL & DBMS',79],['Aptitude',74],['Logical Reasoning',68]].map(([x,v])=><div className="topic-row" key={x}><div><span>{x}</span><b>{v}%</b></div><div className="progress"><i style={{width:v+'%'}}/></div></div>)}</section></div>
-    <div className="dashboard-grid"><section className="panel"><div className="panel-head"><div><small>Recent activity</small><h3>Latest attempts</h3></div><button className="text-btn" onClick={()=>navigate('tests')}>Practice more <ArrowRight size={15}/></button></div><div className="activity-list">{recent.length?recent.map(a=><div className="activity" key={a._id}><span className="activity-icon"><Check size={17}/></span><div><b>{a.testId}</b><small>{new Date(a.completedAt).toLocaleString()} · {a.maxScore} questions</small></div><strong>{a.percentage}%</strong></div>):<div className="empty"><span><BookOpen/></span><h3>No attempts yet</h3><p>Start a test to build your real performance history.</p></div>}</div></section><section className="panel recommendation"><span className="rec-icon"><Sparkles/></span><small>Recommended for you</small><h3>Strengthen SQL JOINs</h3><p>Your recent accuracy in JOIN questions is 61%. A focused 10-question set can help.</p><button className="btn primary full" onClick={()=>navigate('tests')}>Practice weak area <ArrowRight size={16}/></button></section></div>
-    {lastResult && <div className="success-banner"><Check size={18}/><span>Latest result: <b>{lastResult.percentage}%</b> in {lastResult.test.title}.</span><button onClick={()=>navigate('result')}>View result <ArrowRight size={15}/></button></div>}
+  const [swar,setSwar]=useState([]);
+  const [tests,setTests]=useState([]);
+  const [scheduled,setScheduled]=useState([]);
+  const [loading,setLoading]=useState(true);
+
+  useEffect(()=>{
+    if(!user){setLoading(false);return}
+    setLoading(true);
+    Promise.all([
+      api('/my/attempts').then(d=>d.attempts||[]).catch(()=>[]),
+      api('/my/swar-results').then(d=>d.results||[]).catch(()=>[]),
+      api('/tests').then(d=>d.tests||[]).catch(()=>[]),
+      api('/my/scheduled-tests').then(d=>d.tests||[]).catch(()=>[])
+    ]).then(([a,s,t,sch])=>{setAttempts(a);setSwar(s);setTests(t);setScheduled(sch)}).finally(()=>setLoading(false));
+  },[user]);
+
+  const avg=(items,key)=>items.length?Math.round(items.reduce((n,x)=>n+(Number(x[key])||0),0)/items.length):0;
+  const testAvg=avg(attempts,'percentage'), swarAvg=avg(swar,'score');
+  const overallItems=[...attempts.map(x=>({date:x.completedAt||x.createdAt,score:x.percentage||0,type:'Test',label:x.testId})),...swar.map(x=>({date:x.created_at,score:x.score||0,type:'SWAR',label:x.module_title}))].sort((a,b)=>new Date(a.date)-new Date(b.date));
+  const trend=overallItems.slice(-10);
+  const maxTrend=Math.max(100,...trend.map(x=>x.score));
+  const moduleStats=useMemo(()=>{
+    const map=new Map();
+    swar.forEach(x=>{const id=x.module_id||x.module_title;const m=map.get(id)||{id,title:x.module_title,count:0,total:0,fluency:0,grammar:0,comprehension:0};m.count++;m.total+=Number(x.score)||0;m.fluency+=Number(x.fluency_score)||0;m.grammar+=Number(x.grammar_score)||0;m.comprehension+=Number(x.comprehension_score)||0;map.set(id,m)});
+    return [...map.values()].sort((a,b)=>a.total/a.count-b.total/b.count);
+  },[swar]);
+  const testStats=useMemo(()=>{
+    const map=new Map();
+    attempts.forEach(a=>{const t=tests.find(x=>(x.testId||x.test_id)===a.testId);const id=t?.testId||a.testId;const m=map.get(id)||{id,title:t?.title||a.testId,topic:t?.topic||t?.category||'Practice',count:0,total:0};m.count++;m.total+=Number(a.percentage)||0;map.set(id,m)});
+    return [...map.values()].sort((a,b)=>a.total/a.count-b.total/b.count);
+  },[attempts,tests]);
+  const weakAreas=[...testStats.map(x=>({label:x.topic,score:Math.round(x.total/x.count),kind:'Test'})),...moduleStats.map(x=>({label:x.title,score:Math.round(x.total/x.count),kind:'SWAR'}))].sort((a,b)=>a.score-b.score);
+  const recommendations=weakAreas.slice(0,3);
+  const recent=[...attempts.map(a=>({date:a.completedAt||a.createdAt,label:a.testId,score:a.percentage,type:'Assessment'})),...swar.map(x=>({date:x.created_at,label:x.module_title,score:x.score,type:'SWAR'}))].sort((a,b)=>new Date(b.date)-new Date(a.date)).slice(0,8);
+  const completedScheduled=scheduled.filter(x=>attempts.some(a=>a.testId===x.testId)).length;
+  const completionRate=scheduled.length?Math.round(completedScheduled/scheduled.length*100):attempts.length?100:0;
+
+  if(!user)return <main className="container page-pad"><Empty icon={<LayoutDashboard/>} title="Sign in to view your performance" text="Your dashboard combines your assessment and SWAR results from Supabase." action={()=>navigate('login')} actionText="Sign in"/></main>;
+
+  return <main className="container page-pad performance-page">
+    <div className="dashboard-head"><div><div className="kicker">Student performance</div><h1>Your performance dashboard.</h1><p>See your assessment progress and communication practice in one place.</p></div><div className="performance-actions"><button className="btn secondary" onClick={()=>navigate('communication')}><span>🎙️</span> Practice SWAR</button><button className="btn primary" onClick={()=>navigate('tests')}><Plus size={18}/> New practice</button></div></div>
+
+    <div className="stats-grid performance-summary">
+      <div className="metric"><span><BarChart3/></span><small>Overall test average</small><strong>{testAvg}%</strong><em>{attempts.length} completed assessment{attempts.length===1?'':'s'}</em></div>
+      <div className="metric"><span><Sparkles/></span><small>SWAR average</small><strong>{swarAvg}%</strong><em>{swar.length} communication attempt{swar.length===1?'':'s'}</em></div>
+      <div className="metric"><span><Target/></span><small>Best test score</small><strong>{attempts.length?Math.max(...attempts.map(x=>x.percentage||0)):'—'}{attempts.length?'%':''}</strong><em>Highest recorded assessment</em></div>
+      <div className="metric"><span><Check/></span><small>Completion rate</small><strong>{completionRate}%</strong><em>{scheduled.length?'Scheduled assessments':'No active scheduled assessments'}</em></div>
+    </div>
+
+    <div className="performance-grid">
+      <section className="panel performance-trend"><div className="panel-head"><div><small>Combined progress</small><h3>Score trend</h3></div><span className="pill purple">{overallItems.length} total results</span></div>
+        {trend.length?<div className="performance-chart">{trend.map((x,i)=><div className="performance-bar" key={i}><div className="bar-value">{x.score}%</div><i style={{height:Math.max(8,Math.round(x.score/maxTrend*100))+'%'}}/><small>{x.type}</small></div>)}</div>:<div className="empty-inline">Complete a test or SWAR activity to start your score trend.</div>}
+      </section>
+      <section className="panel"><div className="panel-head"><div><small>Side by side</small><h3>Tests vs SWAR</h3></div></div>
+        <div className="compare-card"><div><span className="compare-icon">📝</span><b>Assessments</b><strong>{testAvg}%</strong><small>{attempts.length} attempts</small></div><div><span className="compare-icon">🎙️</span><b>SWAR</b><strong>{swarAvg}%</strong><small>{swar.length} attempts</small></div></div>
+        <div className="mini-progress"><div><span>Test performance</span><b>{testAvg}%</b></div><div className="progress"><i style={{width:testAvg+'%'}}/></div><div><span>SWAR performance</span><b>{swarAvg}%</b></div><div className="progress"><i style={{width:swarAvg+'%'}}/></div></div>
+      </section>
+    </div>
+
+    <div className="performance-grid">
+      <section className="panel"><div className="panel-head"><div><small>SWAR performance</small><h3>Module-wise scores</h3></div><button className="text-btn" onClick={()=>navigate('communication')}>Practice <ArrowRight size={15}/></button></div>
+        {moduleStats.length?moduleStats.map(m=><div className="performance-topic" key={m.id}><div><b>{m.title}</b><span>{m.count} attempt{m.count===1?'':'s'}</span></div><strong>{Math.round(m.total/m.count)}%</strong><div className="progress"><i style={{width:Math.round(m.total/m.count)+'%'}}/></div></div>):<div className="empty-inline">No SWAR scores yet. Start a communication module to build your speaking profile.</div>}
+      </section>
+      <section className="panel"><div className="panel-head"><div><small>Focus areas</small><h3>Weak areas</h3></div></div>
+        {weakAreas.length?weakAreas.slice(0,5).map((x,i)=><div className="weak-area" key={x.kind+x.label}><span>{i+1}</span><div><b>{x.label}</b><small>{x.kind} · {x.score}% average</small></div><strong>{x.score}%</strong></div>):<div className="empty-inline">Complete more activities to identify your weak areas.</div>}
+      </section>
+    </div>
+
+    <section className="panel recommendations-panel"><div className="panel-head"><div><small>Personalized practice</small><h3>Recommended next steps</h3></div><Sparkles size={20}/></div>
+      {recommendations.length?<div className="recommendation-grid">{recommendations.map((x,i)=><div className="practice-recommendation" key={x.kind+x.label}><span className="rec-number">{i+1}</span><div><b>Improve {x.label}</b><p>Your current average is {x.score}%. Focused practice can help you strengthen this area.</p></div><button className="btn secondary" onClick={()=>x.kind==='SWAR'?navigate('communication'):navigate('tests')}>Practice <ArrowRight size={15}/></button></div>)}</div>:<div className="empty-inline">Your personalized recommendations will appear after you complete a few activities.</div>}
+    </section>
+
+    <div className="performance-grid">
+      <section className="panel"><div className="panel-head"><div><small>Recent activity</small><h3>Latest assessments & SWAR</h3></div><button className="text-btn" onClick={()=>navigate('tests')}>Practice more <ArrowRight size={15}/></button></div>
+        {recent.length?recent.map((x,i)=><div className="activity" key={x.type+x.label+i}><span className="activity-icon">{x.type==='SWAR'?'🎙️':<Check size={17}/>}</span><div><b>{x.label}</b><small>{x.type} · {x.date?new Date(x.date).toLocaleString():''}</small></div><strong>{x.score}%</strong></div>):<div className="empty-inline">No recent activity yet.</div>}
+      </section>
+      <section className="panel"><div className="panel-head"><div><small>Assessment progress</small><h3>Scheduled assessments</h3></div></div>
+        {scheduled.length?scheduled.map(x=><div className="activity" key={x._id}><span className="activity-icon"><Calendar size={17}/></span><div><b>{x.test?.title||x.testId}</b><small>{x.label} · Until {new Date(x.endAt).toLocaleString()}</small></div><span className="pill purple">{attempts.some(a=>a.testId===x.testId)?'Completed':'Pending'}</span></div>):<div className="empty-inline">No active scheduled assessments.</div>}
+      </section>
+    </div>
+    {loading&&<div className="loading-note">Refreshing your latest performance data…</div>}
+    {lastResult&&<div className="success-banner"><Check size={18}/><span>Latest result: <b>{lastResult.percentage}%</b> in {lastResult.test.title}.</span><button onClick={()=>navigate('result')}>View result <ArrowRight size={15}/></button></div>}
   </main>;
 }
-
 function TestEngine({attempt,setAttempt,activeTest,questions,submitTest,navigate}) {
   const [seconds,setSeconds]=useState(attempt.seconds),[answers,setAnswers]=useState(attempt.answers),[showSubmit,setShowSubmit]=useState(false),[online,setOnline]=useState(navigator.onLine),[submitting,setSubmitting]=useState(false);
   const q=questions[attempt.index];

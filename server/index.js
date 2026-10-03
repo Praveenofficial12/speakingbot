@@ -60,6 +60,34 @@ async function auth(req,res,next){
 const adminOnly=(req,res,next)=>req.user?.role==='admin'?next():res.status(403).json({error:'Admin access required'});
 const tokenFor=u=>jwt.sign({sub:u.id,role:u.role},JWT_SECRET,{expiresIn:'7d'});
 
+async function updatePracticeProgress(userId){
+  const [{data:attempts,error:ae},{data:swar,error:se},{data:history,error:he}]=await Promise.all([
+    db.from('attempts').select('test_id,percentage,completed_at').eq('user_id',userId).order('completed_at',{ascending:false}).limit(200),
+    db.from('swar_results').select('module_id,module_title,score,created_at').eq('user_id',userId).order('created_at',{ascending:false}).limit(200),
+    db.from('practice_history').select('practice_type,practice_key,title,focus,score,completed_at').eq('user_id',userId).order('completed_at',{ascending:false}).limit(500)
+  ]);
+  if(ae)throw ae;if(se)throw se;if(he)throw he;
+  const all=[...(attempts||[]).map(x=>({date:x.completed_at,score:Number(x.percentage)||0,type:'test',key:x.test_id,title:x.test_id})),...(swar||[]).map(x=>({date:x.created_at,score:Number(x.score)||0,type:'swar',key:x.module_id,title:x.module_title}))].sort((a,b)=>new Date(b.date)-new Date(a.date));
+  const uniqueCompleted=new Set((history||[]).map(x=>x.practice_type+':'+x.practice_key));
+  const completedRecommendations=uniqueCompleted.size,totalPractice=all.length;
+  const recent=all.slice(0,5),prior=all.slice(5,10);
+  const recentAvg=recent.length?recent.reduce((a,x)=>a+x.score,0)/recent.length:0;
+  const priorAvg=prior.length?prior.reduce((a,x)=>a+x.score,0)/prior.length:recentAvg;
+  const improvement=Math.round(Math.max(0,Math.min(100,priorAvg?((recentAvg-priorAvg)/priorAvg)*100:0)));
+  const dates=new Set(all.map(x=>new Date(x.date).toISOString().slice(0,10)));
+  let streak=0,cursor=new Date();cursor.setHours(0,0,0,0);
+  while(dates.has(cursor.toISOString().slice(0,10))){streak++;cursor.setDate(cursor.getDate()-1);}
+  const focusMap=new Map();
+  for(const x of attempts||[]){const key=x.test_id,m=focusMap.get(key)||{score:0,count:0};m.score+=Number(x.percentage)||0;m.count++;focusMap.set(key,m);}
+  for(const x of swar||[]){const key=x.module_id,m=focusMap.get(key)||{score:0,count:0,title:x.module_title};m.score+=Number(x.score)||0;m.count++;m.title=x.module_title;focusMap.set(key,m);}
+  const focus=[...focusMap.entries()].map(([key,m])=>({key,title:m.title||key,score:Math.round(m.score/m.count)})).sort((a,b)=>a.score-b.score)[0];
+  const next=focus?('Practice '+focus.title):'Complete a starter assessment';
+  const row={user_id:userId,completed_recommendations:completedRecommendations,total_practice:totalPractice,current_focus:focus?.title||null,current_focus_score:focus?.score??null,improvement_percentage:improvement,streak_days:streak,last_practice_at:all[0]?.date||null,next_activity:next,updated_at:new Date().toISOString()};
+  const {data,error}=await db.from('practice_progress').upsert(row,{onConflict:'user_id'}).select('*').single();
+  if(error)throw error;
+  return data;
+}
+
 app.get('/api/health',async(_req,res)=>{
   if(!READY)return res.status(503).json({ok:false,database:'not-configured',service:'speakingbot-api'});
   const {error}=await db.from('tests').select('id',{count:'exact',head:true});
@@ -162,10 +190,16 @@ app.post('/api/attempts/submit',auth,async(req,res)=>{
     let correct=0;for(const q of qs)if(Number(answers?.[q.id])===q.answer)correct++;
     const maxScore=qs.length,answered=Object.keys(answers||{}).length;
     const {data:attempt,error:ae}=await db.from('attempts').insert({user_id:req.user.id,test_id:testId,score:correct,max_score:maxScore,percentage:Math.round(correct/maxScore*100),duration_seconds:Math.max(0,Number(durationSeconds||0)),scheduled_access_id:scheduledAccessId?Number(scheduledAccessId):null}).select('*').single();
-    if(ae)throw ae;res.status(201).json({attempt:mapAttempt(attempt),correct,answered,skipped:Math.max(0,maxScore-answered),questions:maxScore});
+    if(ae)throw ae;
+    await db.from('practice_history').insert({user_id:req.user.id,practice_type:'test',practice_key:String(testId),title:String(testId),focus:null,score:Math.round(correct/maxScore*100)});
+    const progress=await updatePracticeProgress(req.user.id);
+    res.status(201).json({attempt:mapAttempt(attempt),correct,answered,skipped:Math.max(0,maxScore-answered),questions:maxScore,progress});
   }catch(e){err(res,e,400);}
 });
-app.post('/api/swar-results',auth,async(req,res)=>{try{const {moduleId,moduleTitle,score,fluencyScore,grammarScore,comprehensionScore,transcript,feedback}=req.body||{};if(!moduleId||!moduleTitle)return res.status(400).json({error:'SWAR module is required'});const row={user_id:req.user.id,module_id:String(moduleId),module_title:String(moduleTitle),score:Math.max(0,Math.min(100,Number(score)||0)),fluency_score:Math.max(0,Math.min(100,Number(fluencyScore)||0)),grammar_score:Math.max(0,Math.min(100,Number(grammarScore)||0)),comprehension_score:Math.max(0,Math.min(100,Number(comprehensionScore)||0)),transcript:String(transcript||'').slice(0,5000),feedback:feedback&&typeof feedback==='object'?feedback:{}};const {data,error}=await db.from('swar_results').insert(row).select('*').single();if(error)throw error;res.status(201).json({result:data});}catch(e){err(res,e,400);}});
+app.post('/api/swar-results',auth,async(req,res)=>{try{const {moduleId,moduleTitle,score,fluencyScore,grammarScore,comprehensionScore,transcript,feedback}=req.body||{};if(!moduleId||!moduleTitle)return res.status(400).json({error:'SWAR module is required'});const row={user_id:req.user.id,module_id:String(moduleId),module_title:String(moduleTitle),score:Math.max(0,Math.min(100,Number(score)||0)),fluency_score:Math.max(0,Math.min(100,Number(fluencyScore)||0)),grammar_score:Math.max(0,Math.min(100,Number(grammarScore)||0)),comprehension_score:Math.max(0,Math.min(100,Number(comprehensionScore)||0)),transcript:String(transcript||'').slice(0,5000),feedback:feedback&&typeof feedback==='object'?feedback:{}};const {data,error}=await db.from('swar_results').insert(row).select('*').single();if(error)throw error;
+    await db.from('practice_history').insert({user_id:req.user.id,practice_type:'swar',practice_key:String(moduleId),title:String(moduleTitle),focus:String(moduleTitle),score:row.score});
+    const progress=await updatePracticeProgress(req.user.id);
+    res.status(201).json({result:data,progress});}catch(e){err(res,e,400);}});
 app.get('/api/my/swar-results',auth,async(req,res)=>{const {data,error}=await db.from('swar_results').select('*').eq('user_id',req.user.id).order('created_at',{ascending:false}).limit(100);if(error)return err(res,error,500);res.json({results:data||[]});});
 app.get('/api/admin/swar-results',auth,adminOnly,async(req,res)=>{const {data,error}=await db.from('swar_results').select('*').order('created_at',{ascending:false}).limit(1000);if(error)return err(res,error,500);res.json({results:data||[]});});
 app.get('/api/my/attempts',auth,async(req,res)=>{const {data,error}=await db.from('attempts').select('*').eq('user_id',req.user.id).order('completed_at',{ascending:false}).limit(100);if(error)return err(res,error,500);res.json({attempts:(data||[]).map(mapAttempt)});});
@@ -188,9 +222,11 @@ app.get('/api/my/recommendations',auth,async(req,res)=>{
     for(const w of ordered){if(recs.length>=6)break;if(w.type==='test'){const matches=(tests||[]).filter(t=>String(t.topic||t.category||'').toLowerCase().includes(String(w.focus).toLowerCase())||String(w.focus).toLowerCase().includes(String(t.topic||'').toLowerCase())).slice(0,2);for(const t of matches){if(recs.length>=6)break;recs.push({key:'test-'+t.test_id,type:'test',title:t.title,test:mapTest(t),difficulty:t.difficulty||'Medium',duration:Number(t.duration||15),focus:w.focus,score:w.score,reason:'Your '+w.focus+' average is '+w.score+'%. Practice this set to target that area.'});}}else{recs.push({key:'swar-'+w.id,type:'swar',title:w.focus||moduleTitles[w.id]||'SWAR Communication Practice',difficulty:'Adaptive',duration:w.id==='story'?2:1,focus:w.focus,score:w.score,reason:'Your '+w.focus+' average is '+w.score+'%. Repeat this module to strengthen your communication performance.'});}}
     if(!recs.length)(tests||[]).slice(0,3).forEach(t=>recs.push({key:'starter-'+t.test_id,type:'test',title:t.title,test:mapTest(t),difficulty:t.difficulty||'Medium',duration:Number(t.duration||15),focus:t.topic||t.category||'Placement skills',score:null,reason:'You have limited result history, so this starter set helps build your performance profile.'}));
     const allScores=[...(attempts||[]).map(x=>Number(x.percentage)||0),...(swar||[]).map(x=>Number(x.score)||0)],focus=ordered[0];
-    res.json({focusTopic:focus?.focus||null,focusScore:focus?.score??null,overallAverage:allScores.length?Math.round(allScores.reduce((a,b)=>a+b,0)/allScores.length):null,recommendations:recs});
+    const progress=await updatePracticeProgress(req.user.id);
+    res.json({focusTopic:focus?.focus||null,focusScore:focus?.score??null,overallAverage:allScores.length?Math.round(allScores.reduce((a,b)=>a+b,0)/allScores.length):null,recommendations:recs,progress});
   }catch(e){err(res,e,500);}
 });
+app.get('/api/my/progress',auth,async(req,res)=>{try{const progress=await updatePracticeProgress(req.user.id);const {data:history,error}=await db.from('practice_history').select('*').eq('user_id',req.user.id).order('completed_at',{ascending:false}).limit(100);if(error)throw error;res.json({progress,history:history||[]});}catch(e){err(res,e,500);}});
 app.get('/api/my/scheduled-tests',auth,async(req,res)=>{
   const {data,error}=await db.from('assessment_access').select('*').eq('active',true).gte('end_at',new Date().toISOString()).or(`email.eq.${req.user.email},audience.eq.global`).order('start_at');
   if(error)return err(res,error,500);

@@ -110,9 +110,9 @@ function App() {
       {page === 'test' && attempt && <TestEngine attempt={attempt} setAttempt={setAttempt} activeTest={activeTest} questions={questions} submitTest={submitTest} navigate={navigate} />}
       {page === 'result' && <Result result={lastResult} questions={questions} navigate={navigate} startTest={startTest} />}
       {page === 'bookmarks' && <Bookmarks bookmarks={bookmarks} setBookmarks={setBookmarks} navigate={navigate} />}
-      {page === 'admin' && <Admin navigate={navigate} user={user} />}
+      {page === 'admin' && <Admin navigate={navigate} user={user} />}\n      {page === 'settings' && <SettingsPage navigate={navigate} user={user} setUser={setUser} dark={dark} setDark={setDark} />}
       {page === 'login' && <Auth navigate={navigate} setUser={setUser} />}
-      {page === 'profile' && <Profile navigate={navigate} user={user} />}
+      {page === 'profile' && <Profile navigate={navigate} user={user} setUser={setUser} />}
       {page === 'home' || page === 'tests' ? <Footer navigate={navigate} /> : null}
     </div>
   );
@@ -251,34 +251,45 @@ function Bookmarks({bookmarks,setBookmarks,navigate}) {
 }
 
 function CommunicationLab({user,navigate}) {
-  const tasks=[
-    {title:'Self Introduction',type:'Speak for 60 seconds',prompt:'Introduce yourself as if you are meeting an HR interviewer for the first time. Mention your education, skills, project experience and career goal.',seconds:60},
-    {title:'Picture / Topic Talk',type:'Speak for 90 seconds',prompt:'Talk about a technology you use every day. Explain what it does, why it is useful, and one improvement you would make.',seconds:90},
-    {title:'Situational Response',type:'Speak for 60 seconds',prompt:'You are asked to explain a technical problem to a non-technical manager. Describe how you would communicate the problem and your solution clearly.',seconds:60},
-    {title:'HR Interview Answer',type:'Speak for 90 seconds',prompt:'Answer: Why should we hire you as a fresher? Give a confident, natural answer using your skills, projects and willingness to learn.',seconds:90}
+  const modules=[
+    {id:'listen-repeat',title:'Listen & Repeat',type:'Listening + Speaking',seconds:60,icon:'🎧',prompt:'Listen to the sentence, then repeat it as naturally and clearly as possible.',sentence:'Effective communication helps a team solve problems quickly and work together with confidence.'},
+    {id:'read-repeat',title:'Read & Repeat',type:'Reading + Speaking',seconds:60,icon:'📖',prompt:'Read the sentence aloud, then repeat it with clear pronunciation and natural pace.',sentence:'The project team completed the application before the scheduled deadline and tested every major feature.'},
+    {id:'incorrect-correction',title:'Listen Incorrect Sentence & Correct It',type:'Listening + Correction',seconds:60,icon:'🔊',prompt:'Listen to the incorrect sentence. Identify the mistake and say the corrected sentence aloud.',sentence:'She do not likes to attend the technical interview because she are nervous.',correct:'She does not like to attend the technical interview because she is nervous.'},
+    {id:'grammar',title:'Grammar',type:'Grammar Practice',seconds:90,icon:'✍️',prompt:'Choose the grammatically correct sentence. Then say the correct sentence aloud.',question:'Choose the correct sentence:',options:['He have completed the project yesterday.','He has completed the project.','He having completed the project.','He complete the project yesterday.'],answer:1,correct:'He has completed the project.'},
+    {id:'story',title:'Story & Answer',type:'Story Listening + Response',seconds:120,icon:'📚',prompt:'Read or listen to the short story and answer the question in your own words.',story:'Ravi was preparing for a placement interview. Every morning, he practiced aptitude questions for one hour and spent another hour improving his communication. On the interview day, he stayed calm, explained his projects clearly, and answered the technical questions using simple examples.',question:'What did Ravi do to prepare for his placement interview, and how did it help him during the interview?'},
+    {id:'jam',title:'JAM — Just A Minute',type:'Fluency + Spontaneous Speaking',seconds:60,icon:'🎤',prompt:'You have one minute. Speak continuously on the topic. Start with an introduction, give two or three points, and finish with a short conclusion.',topics:['Artificial Intelligence in Education','My Favorite Technology','Importance of Teamwork','A Day Without a Smartphone','My Career Goal','Online Learning vs Classroom Learning','The Role of Communication in a Job','A Technology I Want to Learn']}
   ];
-  const [task,setTask]=useState(0); const [running,setRunning]=useState(false); const [seconds,setSeconds]=useState(tasks[0].seconds);
-  const [recording,setRecording]=useState(false); const [audio,setAudio]=useState(''); const [transcript,setTranscript]=useState(''); const [listening,setListening]=useState(false);
-  const recorder=React.useRef(null); const chunks=React.useRef([]);
-  const current=tasks[task];
-  useEffect(()=>{if(!running)return; if(seconds<=0){setRunning(false);stopRecording();return} const id=setInterval(()=>setSeconds(x=>x-1),1000);return()=>clearInterval(id)},[running,seconds]);
-  const selectTask=i=>{setTask(i);setRunning(false);setSeconds(tasks[i].seconds);setAudio('');setTranscript('')};
-  const startRecording=async()=>{try{const stream=await navigator.mediaDevices.getUserMedia({audio:true});chunks.current=[];const mr=new MediaRecorder(stream);recorder.current=mr;mr.ondataavailable=e=>{if(e.data.size)chunks.current.push(e.data)};mr.onstop=()=>{stream.getTracks().forEach(t=>t.stop());const blob=new Blob(chunks.current,{type:'audio/webm'});setAudio(URL.createObjectURL(blob))};mr.start();setRecording(true);setRunning(true);try{const SR=window.SpeechRecognition||window.webkitSpeechRecognition;if(SR){const sr=new SR();sr.continuous=true;sr.interimResults=true;sr.lang='en-IN';sr.onresult=e=>{let text='';for(let i=0;i<e.results.length;i++)text+=e.results[i][0].transcript+' ';setTranscript(text.trim())};sr.onend=()=>setListening(false);sr.start();window.sbRecognition=sr;setListening(true)}}catch{}}catch{alert('Microphone permission is required for speaking practice.')}};
+  const [module,setModule]=useState(0),[running,setRunning]=useState(false),[seconds,setSeconds]=useState(modules[0].seconds);
+  const [recording,setRecording]=useState(false),[audio,setAudio]=useState(''),[transcript,setTranscript]=useState(''),[listening,setListening]=useState(false),[grammarAnswer,setGrammarAnswer]=useState(null),[grammarChecked,setGrammarChecked]=useState(false),[jamTopic,setJamTopic]=useState('');
+  const recorder=React.useRef(null),chunks=React.useRef([]);
+  const current=modules[module];
+  const displayTopic=jamTopic||current.topics?.[0];
+  useEffect(()=>{if(!running)return;if(seconds<=0){stopRecording();return}const id=setInterval(()=>setSeconds(x=>x-1),1000);return()=>clearInterval(id)},[running,seconds]);
+  const selectModule=i=>{stopRecording();setModule(i);setSeconds(modules[i].seconds);setAudio('');setTranscript('');setGrammarAnswer(null);setGrammarChecked(false);setJamTopic('')};
+  const speak=text=>{if(!('speechSynthesis' in window)){alert('Speech playback is not supported in this browser.');return}window.speechSynthesis.cancel();const u=new SpeechSynthesisUtterance(text);u.lang='en-IN';u.rate=.9;window.speechSynthesis.speak(u)};
+  const startRecording=async()=>{try{const stream=await navigator.mediaDevices.getUserMedia({audio:true});chunks.current=[];const mr=new MediaRecorder(stream);recorder.current=mr;mr.ondataavailable=e=>{if(e.data.size)chunks.current.push(e.data)};mr.onstop=()=>{stream.getTracks().forEach(t=>t.stop());setAudio(URL.createObjectURL(new Blob(chunks.current,{type:'audio/webm'})))};mr.start();setRecording(true);setRunning(true);try{const SR=window.SpeechRecognition||window.webkitSpeechRecognition;if(SR){const sr=new SR();sr.continuous=true;sr.interimResults=true;sr.lang='en-IN';sr.onresult=e=>{let text='';for(let i=0;i<e.results.length;i++)text+=e.results[i][0].transcript+' ';setTranscript(text.trim())};sr.onend=()=>setListening(false);sr.start();window.sbRecognition=sr;setListening(true)}}catch{}}catch{alert('Microphone permission is required for speaking practice.')}};
   const stopRecording=()=>{if(recorder.current&&recorder.current.state!=='inactive')recorder.current.stop();if(window.sbRecognition){try{window.sbRecognition.stop()}catch{}window.sbRecognition=null}setRecording(false);setListening(false);setRunning(false)};
-  const reset=()=>{stopRecording();setSeconds(current.seconds);setAudio('');setTranscript('')};
-  const mm=String(Math.floor(seconds/60)).padStart(2,'0'), ss=String(seconds%60).padStart(2,'0');
-  return <main className="container page-pad"><div className="page-hero"><div><div className="kicker">SWAR communication assessment</div><h1>Speak with confidence.</h1><p>Practice the communication skills commonly checked in placement and company assessments: clarity, confidence, structure and natural delivery.</p></div><span className="admin-badge"><ShieldCheck size={16}/> Browser microphone</span></div>
-    <div className="communication-layout"><aside className="panel communication-menu"><small>Assessment modules</small>{tasks.map((x,i)=><button className={i===task?'selected':''} key={x.title} onClick={()=>selectTask(i)}><span>{i+1}</span><div><b>{x.title}</b><small>{x.type}</small></div><ChevronRight size={15}/></button>)}</aside>
-    <section className="panel speaking-stage"><div className="stage-top"><span className="pill purple">{current.type}</span><span className="timer"><Clock3 size={16}/>{mm}:{ss}</span></div><div className="prompt-card"><small>Your speaking prompt</small><h2>{current.prompt}</h2><p>Take a few seconds to organize your answer. Speak naturally, avoid memorizing sentences, and keep your answer structured.</p></div>
+  const reset=()=>{stopRecording();setSeconds(current.seconds);setAudio('');setTranscript('');setGrammarAnswer(null);setGrammarChecked(false)};
+  const newJam=()=>{const t=current.topics[Math.floor(Math.random()*current.topics.length)];setJamTopic(t);setSeconds(current.seconds);setAudio('');setTranscript('');setRunning(false)};
+  const mm=String(Math.floor(seconds/60)).padStart(2,'0'),ss=String(seconds%60).padStart(2,'0');
+  return <main className="container page-pad"><div className="page-hero"><div><div className="kicker">SWAR assessment & communication practice</div><h1>Build real speaking confidence.</h1><p>Practice the six common speaking activities with listening, pronunciation, grammar, story comprehension and spontaneous speaking.</p></div><span className="admin-badge"><ShieldCheck size={16}/> Microphone enabled</span></div>
+    <div className="communication-layout"><aside className="panel communication-menu"><small>SWAR modules</small>{modules.map((x,i)=><button className={i===module?'selected':''} key={x.id} onClick={()=>selectModule(i)}><span>{x.icon}</span><div><b>{x.title}</b><small>{x.type}</small></div><ChevronRight size={15}/></button>)}</aside>
+    <section className="panel speaking-stage"><div className="stage-top"><span className="pill purple">{current.type}</span><span className="timer"><Clock3 size={16}/>{mm}:{ss}</span></div>
+      <div className="prompt-card"><small>{current.title}</small><h2>{current.prompt}</h2>
+        {current.sentence&&<div className="swar-sentence"><p>{current.sentence}</p><button className="btn secondary" onClick={()=>speak(current.sentence)}><Play size={16}/> Listen</button></div>}
+        {current.correct&&<div className="swar-sentence correction"><small>After listening, say this corrected sentence:</small><p>{current.correct}</p></div>}
+        {current.question&&<div className="story-card"><small>{current.story?'Story':'Grammar question'}</small>{current.story&&<p className="story-text">{current.story}</p>}<h3>{current.question}</h3>{current.options&&<div className="grammar-options">{current.options.map((o,i)=><button className={grammarAnswer===i?'selected':''} key={o} onClick={()=>{setGrammarAnswer(i);setGrammarChecked(false)}}><span>{String.fromCharCode(65+i)}</span>{o}</button>)}</div>}{current.answer!==undefined&&<button className="btn secondary" onClick={()=>setGrammarChecked(true)} disabled={grammarAnswer===null}>Check answer</button>}{grammarChecked&&<div className={grammarAnswer===current.answer?'success-banner':'error-banner'}><Check size={17}/>{grammarAnswer===current.answer?'Correct. '+current.correct:'Not quite. Correct answer: '+current.correct}</div>}</div>}
+        {current.topics&&<div className="jam-card"><span className="pill gold">JAM Topic</span><h3>{displayTopic}</h3><button className="btn secondary" onClick={newJam}>New random topic</button></div>}
+      </div>
       <div className={'mic-orb '+(recording?'recording':'')}><div><span>{recording?'●':'🎙'}</span><small>{recording?(listening?'Listening & recording':'Recording'):'Ready to speak'}</small></div></div>
       <div className="stage-actions">{!recording?<button className="btn primary" onClick={startRecording}><Play size={17}/> Start speaking</button>:<button className="btn danger" onClick={stopRecording}>Stop recording</button>}<button className="btn secondary" onClick={reset}>Reset</button></div>
-      {audio&&<div className="recorded"><div><Check size={17}/><b>Your response is recorded</b><small>Listen back and evaluate your delivery.</small></div><audio controls src={audio}/></div>}
-      <div className="self-check"><div><small>Communication self-check</small><h3>Review your answer</h3></div><div className="check-grid">{['Clear pronunciation','Good pace','Confident tone','Logical structure'].map(x=><label key={x}><input type="checkbox"/><span>{x}</span></label>)}</div></div>
-      <div className="transcript"><div><small>Speech transcript</small><h3>{transcript?'What the browser heard':'Transcript appears while you speak'}</h3></div><p>{transcript||'Chrome/Edge speech recognition can show a live transcript. Your audio stays in this browser unless you explicitly submit it through a future backend integration.'}</p></div>
-    </section></div>
-    <div className="communication-note"><Sparkles size={18}/><span><b>Practice mode:</b> This area is designed for repeated communication practice. For a company SWAR assessment, the admin can schedule a timed assessment and give the candidate the access password.</span></div>
-  </main>;
+      {audio&&<div className="recorded"><div><Check size={17}/><b>Your response is recorded</b><small>Play it back and check your clarity, pace and confidence.</small></div><audio controls src={audio}/></div>}
+      {transcript&&<div className="transcript"><div><small>Speech transcript</small><p>{transcript}</p></div><span className="pill purple">{listening?'Live':'Captured'}</span></div>}
+      <div className="self-check"><div><small>Self-review</small><h3>How did you perform?</h3></div><div className="check-grid"><label><input type="checkbox"/> Clear pronunciation</label><label><input type="checkbox"/> Good pace</label><label><input type="checkbox"/> Confident tone</label><label><input type="checkbox"/> Logical structure</label></div></div>
+      <div className="communication-note"><CircleHelp size={17}/><p><b>Practice mode:</b> your recording stays in this browser. In a company SWAR assessment, follow the scheduled assessment instructions and time window.</p></div>
+    </section></div></main>;
 }
+
 
 function Admin({navigate,user}) {
   const [tab,setTab]=useState('overview'); const [metrics,setMetrics]=useState(null); const [schedules,setSchedules]=useState([]); const [tests,setTests]=useState([]); const [error,setError]=useState('');

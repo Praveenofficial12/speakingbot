@@ -165,6 +165,9 @@ app.post('/api/attempts/submit',auth,async(req,res)=>{
     if(ae)throw ae;res.status(201).json({attempt:mapAttempt(attempt),correct,answered,skipped:Math.max(0,maxScore-answered),questions:maxScore});
   }catch(e){err(res,e,400);}
 });
+app.post('/api/swar-results',auth,async(req,res)=>{try{const {moduleId,moduleTitle,score,fluencyScore,grammarScore,comprehensionScore,transcript,feedback}=req.body||{};if(!moduleId||!moduleTitle)return res.status(400).json({error:'SWAR module is required'});const row={user_id:req.user.id,module_id:String(moduleId),module_title:String(moduleTitle),score:Math.max(0,Math.min(100,Number(score)||0)),fluency_score:Math.max(0,Math.min(100,Number(fluencyScore)||0)),grammar_score:Math.max(0,Math.min(100,Number(grammarScore)||0)),comprehension_score:Math.max(0,Math.min(100,Number(comprehensionScore)||0)),transcript:String(transcript||'').slice(0,5000),feedback:feedback&&typeof feedback==='object'?feedback:{}};const {data,error}=await db.from('swar_results').insert(row).select('*').single();if(error)throw error;res.status(201).json({result:data});}catch(e){err(res,e,400);}});
+app.get('/api/my/swar-results',auth,async(req,res)=>{const {data,error}=await db.from('swar_results').select('*').eq('user_id',req.user.id).order('created_at',{ascending:false}).limit(100);if(error)return err(res,error,500);res.json({results:data||[]});});
+app.get('/api/admin/swar-results',auth,adminOnly,async(req,res)=>{const {data,error}=await db.from('swar_results').select('*').order('created_at',{ascending:false}).limit(1000);if(error)return err(res,error,500);res.json({results:data||[]});});
 app.get('/api/my/attempts',auth,async(req,res)=>{const {data,error}=await db.from('attempts').select('*').eq('user_id',req.user.id).order('completed_at',{ascending:false}).limit(100);if(error)return err(res,error,500);res.json({attempts:(data||[]).map(mapAttempt)});});
 
 app.get('/api/my/scheduled-tests',auth,async(req,res)=>{
